@@ -43,12 +43,11 @@ async function procesarCorreos() {
             spreadsheetId: process.env.SPREADSHEET_ID, 
             range: "Clientes!A2:K1000" 
         });
-        const clientesExcel = spreadsheet.data.values || [];
+        const clientes = spreadsheet.data.values || [];
 
-        // Buscamos todos los correos de Netflix (sin límite estricto para no perder ninguno)
         let list = await client.search({ from: "netflix" });
         
-        for (let seq of list.slice(-20).reverse()) {
+        for (let seq of list.slice(-15).reverse()) {
             let meta = await client.fetchOne(seq, { envelope: true });
             let uid = meta.envelope.messageId;
 
@@ -57,60 +56,48 @@ async function procesarCorreos() {
             let msg = await client.fetchOne(seq, { source: true });
             let parsed = await simpleParser(msg.source);
             
-            // --- LIMPIEZA CRÍTICA DEL HTML ---
-            // Quitamos saltos de línea y retornos de carro ANTES de buscar el link
-            let htmlLimpio = (parsed.html || parsed.textAsHtml || "").replace(/[\r\n]/g, "");
+            // Limpieza básica de HTML para no romper el link
+            let htmlOriginal = (parsed.html || parsed.textAsHtml || "").replace(/[\r\n]/g, "");
             let text = (parsed.text || "").replace(/\s+/g, ' '); 
             let correoCuenta = (meta.envelope.to[0].address || "").toLowerCase().trim();
 
-            // 1. IDENTIFICACIÓN PRECISA DEL LINK (Soporta el nftoken gigante)
-            const linkMatch = htmlLimpio.match(/href="([^"]*update-primary-location[^"]*)"/i) || 
-                              htmlLimpio.match(/href="([^"]*update-home[^"]*)"/i) || 
-                              htmlLimpio.match(/href="([^"]*confirm-account[^"]*)"/i) ||
-                              htmlLimpio.match(/href="([^"]*netflix.com\/browse[^"]*)"/i);
+            // EXTRACCIÓN DEL LINK (Priorizando el de actualización de hogar)
+            const linkMatch = htmlOriginal.match(/href="([^"]*update-primary-location[^"]*)"/i) || 
+                              htmlOriginal.match(/href="([^"]*update-home[^"]*)"/i) || 
+                              htmlOriginal.match(/href="([^"]*confirm-account[^"]*)"/i);
             
-            // Limpieza del link: corregimos &amp; y quitamos espacios que Netflix a veces mete en el HTML
             const elLink = linkMatch ? linkMatch[1].replace(/&amp;/g, "&").replace(/\s/g, "") : null;
 
-            // 2. CAPTURAR EL TEXTO DEL CORREO
-            // Buscamos la frase que le dice al usuario qué está pasando
-            const cuerpoMatch = text.match(/(Solicitud de.*?)(?=Si no hiciste|$)/i);
-            let textoNetflix = cuerpoMatch ? cuerpoMatch[1].trim() : "Se solicitó una actualización de hogar para tu cuenta.";
+            // EXTRACCIÓN DE PERFIL
+            const matchSolicitud = text.match(/Solicitud de\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ ]+)/i);
+            let perfilDelCorreo = matchSolicitud ? matchSolicitud[1].trim() : "DESCONOCIDO";
 
-            // Extraer Perfil para filtrar en el Excel
-            const matchPerfil = text.match(/Solicitud de\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ ]+)/i);
-            let perfilEncontrado = matchPerfil ? matchPerfil[1].trim() : "DESCONOCIDO";
-
-            if (elLink && perfilEncontrado !== "DESCONOCIDO") {
-                const perfilBusqueda = perfilEncontrado.toLowerCase().trim();
-                const llaveUnica = `${correoCuenta}-${perfilBusqueda}`;
+            if (elLink && perfilDelCorreo !== "DESCONOCIDO") {
+                const perfilBusqueda = perfilDelCorreo.toLowerCase().trim();
+                const llaveSpam = `${correoCuenta}-${perfilBusqueda}`;
                 const ahora = Date.now();
 
                 // Anti-spam por perfil (3 minutos)
-                if (enviosRecientes.has(llaveUnica) && (ahora - enviosRecientes.get(llaveUnica) < 180000)) {
+                if (enviosRecientes.has(llaveSpam) && (ahora - enviosRecientes.get(llaveSpam) < 180000)) {
                     correosProcesados.add(uid);
                     continue;
                 }
 
-                // Filtrar en Excel por Correo (E) y Perfil (G)
-                const coincidencias = clientesExcel.filter(c => 
+                // BUSCAR EN EXCEL
+                const coincidencias = clientes.filter(c => 
                     (c[4] || "").toLowerCase().trim() === correoCuenta && 
                     (c[6] || "").toLowerCase().trim() === perfilBusqueda
                 );
 
                 if (coincidencias.length > 0) {
                     for (let cliente of coincidencias) {
-                        const mensajeFinal = `📺 *NETFLIX ACTUALIZACIÓN*\n\n` +
-                            `Hola *${cliente[1]}*,\n\n` +
-                            `_${textoNetflix}_\n\n` +
-                            `*Usa este link para activar:*\n${elLink}`;
-                        
-                        await enviarWA(cliente[2], mensajeFinal);
+                        const msjCliente = `🏠 *ACTUALIZACIÓN NETFLIX*\n\nHola *${cliente[1]}*, pulsa el link para activar tu TV en el perfil *${perfilDelCorreo}*:\n\n${elLink}`;
+                        await enviarWA(cliente[2], msjCliente);
                     }
-                    await enviarWA(ADMIN_PHONE, `✅ *ENVIADO*: Perfil "${perfilEncontrado}" de ${correoCuenta}`);
-                    enviosRecientes.set(llaveUnica, ahora);
+                    await enviarWA(ADMIN_PHONE, `✅ *ENVIADO*: ${perfilDelCorreo} (${correoCuenta})`);
+                    enviosRecientes.set(llaveSpam, ahora);
                 } else {
-                    await enviarWA(ADMIN_PHONE, `⚠️ *PERFIL NO REGISTRADO*: "${perfilEncontrado}" en cuenta ${correoCuenta}. Revisa el Excel.`);
+                    await enviarWA(ADMIN_PHONE, `⚠️ *SIN REGISTRO*: ${perfilDelCorreo} en ${correoCuenta}`);
                 }
                 correosProcesados.add(uid);
             }
