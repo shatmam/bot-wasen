@@ -4,12 +4,13 @@ const { simpleParser } = require('mailparser');
 const { google } = require("googleapis");
 const fetch = require("node-fetch");
 
+// ================= CONFIGURACIÓN =================
 const EMAIL_USER = process.env.EMAIL_USER; 
 const EMAIL_PASS = process.env.EMAIL_PASS; 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID; 
 const WA_TOKEN = process.env.WA_TOKEN; 
 const ADMIN_PHONE = process.env.ADMIN_PHONE; 
-const RECHECK_TIME = 20 * 1000; // 20 segundos para no saturar Gmail
+const RECHECK_TIME = 15 * 1000; // 15 segundos
 
 let botIniciado = false;
 
@@ -17,27 +18,33 @@ async function enviarWA(tel, msj) {
     try {
         let numero = tel.toString().replace(/[^0-9]/g, "");
         if (!numero.startsWith("1") && numero.length === 10) numero = "1" + numero;
-        const response = await fetch("https://www.wasenderapi.com/api/send-message", {
+        
+        await fetch("https://www.wasenderapi.com/api/send-message", {
             method: "POST",
             headers: { "Authorization": `Bearer ${WA_TOKEN}`, "Content-Type": "application/json" },
             body: JSON.stringify({ to: numero, text: msj })
         });
-        return await response.json();
     } catch (e) { console.log("❌ Error WA:", e.message); }
 }
 
 async function procesarCorreos() {
-    console.log("🔍 Iniciando escaneo de diagnóstico...");
+    console.log("🔍 Iniciando escaneo profundo...");
     const client = new ImapFlow({
-        host: "imap.gmail.com", port: 993, secure: true,
+        host: "imap.gmail.com", 
+        port: 993, 
+        secure: true,
         auth: { user: EMAIL_USER, pass: EMAIL_PASS },
-        logger: false, tls: { rejectUnauthorized: false }
+        logger: false, 
+        tls: { rejectUnauthorized: false }
     });
 
     try {
         await client.connect();
+        
+        // Intentamos abrir "INBOX" pero si no hay nada, podrías cambiarlo a "[Gmail]/Todos"
         await client.mailboxOpen('INBOX');
 
+        // 1. Leer Google Sheets
         const auth = new google.auth.GoogleAuth({
             credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
             scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"]
@@ -50,63 +57,73 @@ async function procesarCorreos() {
         const clientes = spreadsheet.data.values || [];
 
         if (!botIniciado) {
-            await enviarWA(ADMIN_PHONE, `🔎 *DIAGNÓSTICO INICIADO*\n📊 Clientes en Excel: ${clientes.length}\n📅 Buscando correos desde ayer.`);
+            await enviarWA(ADMIN_PHONE, `🕵️ *BOT EN LINEA*\n📊 Clientes cargados: ${clientes.length}\n⚙️ Escaneando últimos 10 correos...`);
             botIniciado = true;
         }
 
-        // Buscamos correos de Netflix desde ayer
-        let fechaAyer = new Date();
-        fechaAyer.setDate(fechaAyer.getDate() - 1);
-        
-        let list = await client.search({ from: "netflix", since: fechaAyer });
-        console.log(`Se encontraron ${list.length} correos de Netflix desde ayer.`);
+        // 2. Buscar TODOS los últimos 10 correos (sin filtros de Netflix para ver qué lee)
+        let list = await client.search({ all: true });
+        let ultimos = list.slice(-10).reverse();
 
-        for (let seq of list.reverse()) { // Del más nuevo al más viejo
+        for (let seq of ultimos) {
             let msg = await client.fetchOne(seq, { source: true, envelope: true });
             let parsed = await simpleParser(msg.source);
+            
+            let asunto = (msg.envelope.subject || "").toLowerCase();
+            let deQuien = (msg.envelope.from[0].address || "").toLowerCase();
             let contenido = (parsed.text || "").toLowerCase();
             let html = parsed.html || parsed.textAsHtml || "";
             let correoCuenta = (msg.envelope.to[0].address || "").toLowerCase().trim();
 
-            // Detectar link
-            const linkMatch = html.match(/href="([^"]*update-home[^"]*)"/) || 
-                             html.match(/href="([^"]*confirm-account[^"]*)"/);
-
-            if (linkMatch) {
-                const elLink = linkMatch[1];
+            // 3. Si detecta Netflix, empezamos el reporte
+            if (deQuien.includes("netflix") || asunto.includes("netflix")) {
+                
+                // Extraer Perfil
                 const perfilMatch = contenido.match(/solicitud de\s+([^\n,]+)/i);
-                let perfilDelCorreo = perfilMatch ? perfilMatch[1].trim().toLowerCase() : "no detectado";
+                let perfilDelCorreo = perfilMatch ? perfilMatch[1].trim().toLowerCase() : "No detectado";
 
-                // REPORTE AL ADMIN POR CADA CORREO ENCONTRADO
-                console.log(`Analizando: Cuenta ${correoCuenta} | Perfil: ${perfilDelCorreo}`);
+                // Avisar al Admin que encontró algo
+                await enviarWA(ADMIN_PHONE, `📩 *NETFLIX ENCONTRADO*\n📧 Cuenta: ${correoCuenta}\n👤 Perfil en correo: "${perfilDelCorreo}"`);
 
-                // Intentar match
-                const clienteCorrecto = clientes.find(c => {
-                    const correoExcel = (c[4] || "").toLowerCase().trim();
-                    const perfilExcel = (c[6] || "").toLowerCase().trim();
-                    // Match flexible: que el perfil del correo contenga lo que dice el Excel o viceversa
-                    return correoExcel === correoCuenta && (perfilDelCorreo.includes(perfilExcel) || perfilExcel.includes(perfilDelCorreo));
-                });
+                // Buscar Link
+                const linkMatch = html.match(/href="([^"]*update-home[^"]*)"/) || 
+                                 html.match(/href="([^"]*confirm-account[^"]*)"/);
 
-                if (clienteCorrecto) {
-                    await enviarWA(clienteCorrecto[2], `🏠 *ACTUALIZACIÓN NETFLIX*\n\nPerfil: *${perfilDelCorreo.toUpperCase()}*\nLink: ${elLink}`);
-                    await enviarWA(ADMIN_PHONE, `✅ *ÉXITO*: Se envió a ${clienteCorrecto[1]} para la cuenta ${correoCuenta}.`);
+                if (linkMatch) {
+                    const elLink = linkMatch[1];
+                    
+                    // Buscar coincidencia en Excel (Correo Col E + Perfil Col G)
+                    const clienteCorrecto = clientes.find(c => {
+                        const correoExcel = (c[4] || "").toLowerCase().trim();
+                        const perfilExcel = (c[6] || "").toLowerCase().trim();
+                        // Match flexible
+                        return correoExcel === correoCuenta && 
+                               (perfilDelCorreo.includes(perfilExcel) || perfilExcel.includes(perfilDelCorreo));
+                    });
+
+                    if (clienteCorrecto) {
+                        // Enviar al cliente
+                        const msjExito = `🏠 *ACTUALIZACIÓN NETFLIX*\n\nHola *${clienteCorrecto[1]}*, detectamos tu solicitud en el perfil *${perfilDelCorreo.toUpperCase()}*.\n\nActiva aquí:\n${elLink}`;
+                        await enviarWA(clienteCorrecto[2], msjExito);
+                        
+                        // Reportar al Admin
+                        await enviarWA(ADMIN_PHONE, `✅ *ENVIADO OK*\nCliente: ${clienteCorrecto[1]}\nPerfil: ${perfilDelCorreo}`);
+                    } else {
+                        // Reportar porque no hubo match
+                        await enviarWA(ADMIN_PHONE, `⚠️ *SIN MATCH EN EXCEL*\nVi el perfil "${perfilDelCorreo}" para ${correoCuenta}, pero no coincide con tu Columna G.`);
+                    }
                 } else {
-                    // Si no hay match, te explica por qué
-                    let errorMsg = `⚠️ *FALLO DE COINCIDENCIA*\n\n` +
-                                   `📧 Cuenta correo: ${correoCuenta}\n` +
-                                   `👤 Perfil correo: "${perfilDelCorreo}"\n\n` +
-                                   `🔍 Revisa si en tu Excel tienes una fila con ese correo exacto y si en la Columna G dice exactamente ese perfil.`;
-                    await enviarWA(ADMIN_PHONE, errorMsg);
+                    await enviarWA(ADMIN_PHONE, `❌ *LINK NO ENCONTRADO*\nEncontré el correo pero no el enlace de activación.`);
                 }
             }
         }
         await client.logout();
     } catch (e) {
-        console.log("❌ Error:", e.message);
+        console.log("Error:", e.message);
         if (client) await client.logout().catch(() => {});
     }
 }
 
+// Iniciar ciclo
 procesarCorreos();
 setInterval(procesarCorreos, RECHECK_TIME);
