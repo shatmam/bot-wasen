@@ -9,7 +9,7 @@ const WA_TOKEN = process.env.WA_TOKEN;
 const RECHECK_TIME = 1 * 60 * 1000; 
 
 const correosProcesados = new Set();
-const enviosRecientes = new Map(); 
+const enviosRecientes = new Map();
 
 async function enviarWA(tel, msj) {
     try {
@@ -56,18 +56,22 @@ async function procesarCorreos() {
             let msg = await client.fetchOne(seq, { source: true });
             let parsed = await simpleParser(msg.source);
             
-            // 1. LIMPIEZA DE HTML (Elimina saltos de línea invisibles que rompen el link)
-            let htmlLimpio = (parsed.html || parsed.textAsHtml || "").replace(/[\r\n]/g, "");
+            // 1. LIMPIEZA AGRESIVA DE SALTOS DE LÍNEA
+            // Netflix usa "=" al final de las líneas en el código fuente para indicar saltos.
+            // Esto une el link largo correctamente antes de buscarlo.
+            let htmlLimpio = (parsed.html || parsed.textAsHtml || "").replace(/=\r?\n/g, "").replace(/[\r\n]/g, "");
             let text = (parsed.text || "").replace(/\s+/g, ' '); 
             let correoCuenta = (meta.envelope.to[0].address || "").toLowerCase().trim();
 
-            // 2. BUSCADOR DE LINK (Prioriza update-primary-location y limpia el link final)
+            // 2. BÚSQUEDA DEL LINK REAL (Priorizando la actualización de hogar)
             const linkMatch = htmlLimpio.match(/href="([^"]*update-primary-location[^"]*)"/i) ||
                               htmlLimpio.match(/href="([^"]*update-home[^"]*)"/i) || 
                               htmlLimpio.match(/href="([^"]*confirm-account[^"]*)"/i);
             
-            // Limpieza del link: corregimos '&amp;' y quitamos espacios accidentales
-            const elLink = linkMatch ? linkMatch[1].replace(/&amp;/g, '&').replace(/\s/g, "") : null;
+            // 3. NORMALIZACIÓN DEL LINK
+            // Cambiamos &amp; por & y eliminamos cualquier espacio en blanco remanente
+            let elLink = linkMatch ? linkMatch[1].replace(/&amp;/g, '&').trim() : null;
+            if (elLink) elLink = elLink.split(' ')[0].replace(/\s/g, "");
 
             const matchSolicitud = text.match(/Solicitud de\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ ]+)/i);
             const matchHola = text.match(/Hola,\s*([^:]+):/i);
@@ -78,26 +82,25 @@ async function procesarCorreos() {
                 const llaveSpam = `${correoCuenta}-${perfilBusqueda}`;
                 const ahora = Date.now();
 
-                // FILTRO ANTI-SPAM
                 if (enviosRecientes.has(llaveSpam) && (ahora - enviosRecientes.get(llaveSpam) < 300000)) {
                     correosProcesados.add(uid);
                     continue;
                 }
 
-                const clientesEncontrados = clientes.filter(c => 
+                const coincidencias = clientes.filter(c => 
                     (c[4] || "").toLowerCase().trim() === correoCuenta && 
                     (c[6] || "").toLowerCase().trim() === perfilBusqueda
                 );
 
-                if (clientesEncontrados.length > 0) {
-                    for (let cliente of clientesEncontrados) {
+                if (coincidencias.length > 0) {
+                    for (let cliente of coincidencias) {
                         const msjCliente = `🏠 *ACTUALIZACIÓN NETFLIX*\n\nHola *${cliente[1]}*, pulsa el link para activar tu TV:\n\n${elLink}`;
                         await enviarWA(cliente[2], msjCliente);
                     }
-                    await enviarWA(ADMIN_PHONE, `✅ *ENVIADO*: ${perfilDelCorreo} (${correoCuenta})`);
+                    console.log(`✅ Enviado a ${perfilDelCorreo} (${correoCuenta})`);
                     enviosRecientes.set(llaveSpam, ahora); 
                 } else {
-                    await enviarWA(ADMIN_PHONE, `⚠️ *SIN REGISTRO*: ${perfilDelCorreo} en ${correoCuenta}`);
+                    console.log(`⚠️ Perfil no encontrado: ${perfilDelCorreo} en ${correoCuenta}`);
                 }
                 correosProcesados.add(uid);
             }
