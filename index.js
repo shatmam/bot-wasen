@@ -58,18 +58,18 @@ async function procesarCorreos() {
             
             let htmlRaw = parsed.html || "";
 
-            // 🔥 FIX REAL DEL LINK (sin romper nada)
+            // 🔥 FIX DEFINITIVO DEL LINK (ÚNICO CAMBIO)
             let htmlLimpio = htmlRaw
-                .replace(/=\r?\n/g, "")   // reconstruye links cortados
+                .replace(/=\r?\n/g, "")   // reconstruye líneas cortadas
                 .replace(/&amp;/g, "&");
 
-            // obtener todos los links
-            const links = htmlLimpio.match(/https:\/\/www\.netflix\.com\/[^\s"<>]+/gi) || [];
+            // extraer TODOS los href reales
+            const hrefs = [...htmlLimpio.matchAll(/href="([^"]+)"/gi)].map(m => m[1]);
 
-            // filtrar SOLO el link correcto
-            const linkBueno = links.find(l => 
-                l.includes("update-primary-location") || 
-                l.includes("update-home")
+            // filtrar SOLO el correcto
+            const linkBueno = hrefs.find(l => 
+                l.includes("netflix.com") &&
+                (l.includes("update-primary-location") || l.includes("update-home"))
             );
 
             const elLink = linkBueno
@@ -80,7 +80,7 @@ async function procesarCorreos() {
                 : null;
 
             // 🧪 debug (puedes quitar luego)
-            console.log("🔗 LINK DETECTADO:", elLink);
+            console.log("✅ LINK FINAL:", elLink);
 
             let text = (parsed.text || "").replace(/\s+/g, ' '); 
             let correoCuenta = (meta.envelope.to[0].address || "").toLowerCase().trim();
