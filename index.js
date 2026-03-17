@@ -8,8 +8,8 @@ const ADMIN_PHONE = process.env.ADMIN_PHONE;
 const WA_TOKEN = process.env.WA_TOKEN;
 const RECHECK_TIME = 1 * 60 * 1000; 
 
-const idsEnviados = new Set();
-let botIniciado = false;
+const correosProcesados = new Set();
+const enviosRecientes = new Map(); // Para evitar spam por perfil/cuenta
 
 async function enviarWA(tel, msj) {
     try {
@@ -43,57 +43,58 @@ async function procesarCorreos() {
             spreadsheetId: process.env.SPREADSHEET_ID, 
             range: "Clientes!A2:K1000" 
         });
-        const todosLosClientes = spreadsheet.data.values || [];
+        const clientes = spreadsheet.data.values || [];
 
-        let haceDosDias = new Date();
-        haceDosDias.setDate(haceDosDias.getDate() - 2);
-        let list = await client.search({ from: "netflix", since: haceDosDias });
-
-        if (!botIniciado) {
-            await enviarWA(ADMIN_PHONE, `🚀 *BOT TOTALMENTE VINCULADO*\nEscaneo de Correo + Perfil activo.\nMemoria anti-repetición: ON.`);
-            botIniciado = true;
-        }
-
-        for (let seq of list.reverse()) {
+        let list = await client.search({ from: "netflix" });
+        
+        for (let seq of list.slice(-10).reverse()) {
             let meta = await client.fetchOne(seq, { envelope: true });
             let uid = meta.envelope.messageId;
 
-            if (idsEnviados.has(uid)) continue;
+            if (correosProcesados.has(uid)) continue;
 
             let msg = await client.fetchOne(seq, { source: true });
             let parsed = await simpleParser(msg.source);
-            let htmlOriginal = parsed.html || "";
+            let htmlOriginal = parsed.html || parsed.textAsHtml || "";
             let text = (parsed.text || "").replace(/\s+/g, ' '); 
             let correoCuenta = (meta.envelope.to[0].address || "").toLowerCase().trim();
 
             const linkMatch = htmlOriginal.match(/href="([^"]*update-home[^"]*)"/) || 
-                              htmlOriginal.match(/href="([^"]*pin-code[^"]*)"/) || 
-                              htmlOriginal.match(/href="([^"]*confirm-account[^"]*)"/);
-            
-            const elLink = linkMatch ? linkMatch[1].replace(/&amp;/g, "&") : null;
+                              htmlOriginal.match(/href="([^"]*confirm-account[^"]*)"/) || 
+                              htmlOriginal.match(/href="([^"]*netflix.com\/browse[^"]*)"/);
+            const elLink = linkMatch ? linkMatch[1] : null;
 
             const matchSolicitud = text.match(/Solicitud de\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]+)/i);
             const matchHola = text.match(/Hola,\s*([^:]+):/i);
-            let perfilFinal = matchSolicitud ? matchSolicitud[1].trim() : (matchHola ? matchHola[1].trim() : null);
+            let perfilDelCorreo = matchSolicitud ? matchSolicitud[1].trim() : (matchHola ? matchHola[1].trim() : "DESCONOCIDO");
 
-            if (elLink && perfilFinal) {
-                const perfilBusqueda = perfilFinal.toLowerCase().trim();
+            if (elLink && perfilDelCorreo !== "DESCONOCIDO") {
+                const perfilBusqueda = perfilDelCorreo.toLowerCase().trim();
+                const llaveSpam = `${correoCuenta}-${perfilBusqueda}`;
+                const ahora = Date.now();
 
-                const clientesCoincidentes = todosLosClientes.filter(c => 
+                // 🛡️ FILTRO ANTI-SPAM: Si ya se envió un link para este perfil en los últimos 5 min, saltar
+                if (enviosRecientes.has(llaveSpam) && (ahora - enviosRecientes.get(llaveSpam) < 300000)) {
+                    correosProcesados.add(uid);
+                    continue;
+                }
+
+                const clientesEncontrados = clientes.filter(c => 
                     (c[4] || "").toLowerCase().trim() === correoCuenta && 
                     (c[6] || "").toLowerCase().trim() === perfilBusqueda
                 );
 
-                if (clientesCoincidentes.length > 0) {
-                    for (let cliente of clientesCoincidentes) {
-                        const tipo = elLink.includes("pin-code") ? "ACCESO TEMPORAL" : "HOGAR";
-                        await enviarWA(cliente[2], `📺 *NETFLIX ${tipo}*\n\nHola *${cliente[1]}*, activa tu perfil *${perfilFinal}* aquí:\n${elLink}`);
+                if (clientesEncontrados.length > 0) {
+                    for (let cliente of clientesEncontrados) {
+                        const msjCliente = `🏠 *ACTUALIZACIÓN NETFLIX*\n\nHola *${cliente[1]}*, pulsa el botón para activar tu TV:\n\n${elLink}`;
+                        await enviarWA(cliente[2], msjCliente);
                     }
-                    await enviarWA(ADMIN_PHONE, `✅ *ENVIADO*: ${perfilFinal} (${correoCuenta})`);
+                    await enviarWA(ADMIN_PHONE, `✅ *ENVIADO*: ${perfilDelCorreo} (${correoCuenta})`);
+                    enviosRecientes.set(llaveSpam, ahora); // Registramos el envío
                 } else {
-                    await enviarWA(ADMIN_PHONE, `⚠️ *ALERTA*: Perfil "${perfilFinal}" no coincide en ${correoCuenta}. Revisa el Excel.`);
+                    await enviarWA(ADMIN_PHONE, `⚠️ *SIN COINCIDENCIA*: Perfil "${perfilDelCorreo}" en cuenta ${correoCuenta} no existe en Excel.`);
                 }
-                idsEnviados.add(uid);
+                correosProcesados.add(uid);
             }
         }
         await client.logout();
