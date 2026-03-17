@@ -6,32 +6,7 @@ const fetch = require("node-fetch");
 
 const ADMIN_PHONE = process.env.ADMIN_PHONE; 
 const WA_TOKEN = process.env.WA_TOKEN;
-const RECHECK_TIME = 1 * 60 * 1000; 
-
-const correosProcesados = new Set();
-const enviosRecientes = new Map();
-
-async function enviarWA(tel, msj) {
-    try {
-        let numero = tel.toString().replace(/[^0-9]/g, "");
-        if (!numero.startsWith("1") && numero.length === 10) numero = "1" + numero;
-        await fetch("https://www.wasenderapi.com/api/send-message", {
-            method: "POST",
-            headers: { "Authorization": `Bearer ${WA_TOKEN}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ to: "+" + numero, text: msj })
-        });
-    } catch (e) { console.log("❌ Error WA:", e.message); }
-}
-
-async function procesarCorreos() {
-    console.log("🔍 Escaneando perfiles (Modo Multi-Envío)...");
-    const client = new ImapFlow({
-        host: "imap.gmail.com", port: 993, secure: true,
-        auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
-        logger: false, tls: { rejectUnauthorized: false }
-    });
-
-    try {
+co
         await client.connect();
         await client.mailboxOpen('INBOX');
 
