@@ -10,7 +10,9 @@ const EMAIL_PASS = process.env.EMAIL_PASS;
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID; 
 const WA_TOKEN = process.env.WA_TOKEN; 
 const ADMIN_PHONE = process.env.ADMIN_PHONE; 
-const RECHECK_TIME = 1 * 60 * 1000; // 1 minuto
+const RECHECK_TIME = 1 * 60 * 1000; // Revisar cada 1 minuto
+
+let botIniciado = false;
 
 async function enviarWA(tel, msj) {
     try {
@@ -26,7 +28,7 @@ async function enviarWA(tel, msj) {
 }
 
 async function procesarCorreos() {
-    console.log("🔍 Revisando Gmail...");
+    console.log("🔍 Revisando Gmail y Google Sheets...");
     const client = new ImapFlow({
         host: "imap.gmail.com", port: 993, secure: true,
         auth: { user: EMAIL_USER, pass: EMAIL_PASS },
@@ -34,9 +36,11 @@ async function procesarCorreos() {
     });
 
     try {
+        // 1. Conexión a Gmail
         await client.connect();
         await client.mailboxOpen('INBOX');
 
+        // 2. Conexión a Google Sheets
         const auth = new google.auth.GoogleAuth({
             credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
             scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"]
@@ -48,12 +52,15 @@ async function procesarCorreos() {
         });
         const clientes = spreadsheet.data.values || [];
 
-        // Buscar solo correos NO LEÍDOS de Netflix
-        let list = await client.search({ from: "netflix", unseen: true });
-
-        if (list.length > 0) {
-            console.log(`📩 Se encontraron ${list.length} correos nuevos.`);
+        // Notificación de primer arranque para el Admin
+        if (!botIniciado) {
+            await enviarWA(ADMIN_PHONE, `🚀 *BOT INICIADO CORRECTAMENTE*\n\n📊 *Sincronización*: SÍ\n👥 *Clientes leídos*: ${clientes.length}\n📧 *Correo*: ${EMAIL_USER}\n\nEl sistema está vigilando correos nuevos cada minuto.`);
+            botIniciado = true;
+            console.log(`✅ Bot activo. Sincronizados ${clientes.length} clientes.`);
         }
+
+        // 3. Buscar correos NO LEÍDOS de Netflix
+        let list = await client.search({ from: "netflix", unseen: true });
 
         for (let seq of list) {
             let msg = await client.fetchOne(seq, { source: true, envelope: true });
@@ -62,6 +69,7 @@ async function procesarCorreos() {
             let html = parsed.html || parsed.textAsHtml || "";
             let contenido = (parsed.text || "").toLowerCase();
 
+            // Filtros de utilidad
             const esUtil = subject.includes("código") || subject.includes("codigo") || subject.includes("temporal") || subject.includes("hogar");
             const esCambio = subject.includes("contraseña") || subject.includes("password") || contenido.includes("restablecer");
 
@@ -75,32 +83,27 @@ async function procesarCorreos() {
                     const cliente = clientes.find(c => (c[4] || "").toLowerCase().trim() === correoDestino);
 
                     if (cliente) {
-                        // 1. Notificar al Cliente
+                        // Enviar al cliente
                         await enviarWA(cliente[2], `🏠 *ACTUALIZACIÓN NETFLIX*\n\nHola *${cliente[1]}*, activa tu TV aquí:\n\n${elLink}`);
-                        
-                        // 2. Notificar al Admin (Éxito)
-                        await enviarWA(ADMIN_PHONE, `✅ *ENVIADO AUTOMÁTICO*\n\n👤 Cliente: ${cliente[1]}\n📧 Cuenta: ${correoDestino}\n📱 Tel: ${cliente[2]}`);
+                        // Reportar éxito al Admin
+                        await enviarWA(ADMIN_PHONE, `✅ *LINK ENVIADO*\n👤: ${cliente[1]}\n📧: ${correoDestino}\n📱: ${cliente[2]}`);
                     } else {
-                        // 3. Notificar al Admin (Error: Cliente no está en Excel)
-                        await enviarWA(ADMIN_PHONE, `⚠️ *CORREO SIN DUEÑO*\n\nLlegó un link para: ${correoDestino}\nPero no está en tu Excel.\n\n🔗 Link: ${elLink}`);
+                        // Reportar correo sin registro en Excel
+                        await enviarWA(ADMIN_PHONE, `⚠️ *CUENTA DESCONOCIDA*\nLlegó un link para: ${correoDestino}\nPero no está en el Excel.\n\n🔗 Link: ${elLink}`);
                     }
                 }
             }
-            // Marcar como leído para no repetir
+            // Marcar como leído
             await client.messageFlagsAdd(seq, ['\\Seen']);
         }
         await client.logout();
     } catch (e) {
-        console.log("❌ Error:", e.message);
+        console.log("❌ Error fatal:", e.message);
         await enviarWA(ADMIN_PHONE, `🚨 *ERROR CRÍTICO*: ${e.message}`);
         if (client) await client.logout().catch(() => {});
     }
 }
 
-// Mensaje de inicio
-console.log("🚀 Bot de Netflix Iniciado");
-enviarWA(ADMIN_PHONE, "🚀 *SISTEMA ACTIVO*\nEl bot de Netflix está encendido y revisando correos cada minuto.");
-
-// Ejecutar
+// Ejecución cíclica
 procesarCorreos();
 setInterval(procesarCorreos, RECHECK_TIME);
