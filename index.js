@@ -45,6 +45,7 @@ async function procesarCorreos() {
         });
         const clientes = spreadsheet.data.values || [];
 
+        // Buscamos correos de Netflix
         let list = await client.search({ from: "netflix" });
         
         for (let seq of list.slice(-10).reverse()) {
@@ -55,32 +56,26 @@ async function procesarCorreos() {
 
             let msg = await client.fetchOne(seq, { source: true });
             let parsed = await simpleParser(msg.source);
-            
-            let htmlRaw = parsed.html || "";
-            let htmlLimpio = htmlRaw
-                .replace(/=\r?\n/g, "") 
-                .replace(/[\r\n]/g, "")
-                .replace(/&amp;/g, "&");
-
             let text = (parsed.text || "").replace(/\s+/g, ' '); 
             let correoCuenta = (meta.envelope.to[0].address || "").toLowerCase().trim();
 
+            // Identificamos el perfil en el texto del correo
             const matchSolicitud = text.match(/Solicitud de\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ ]+)/i);
             const matchHola = text.match(/Hola,\s*([^:]+):/i);
-            let perfilDelCorreo = matchSolicitud ? matchSolicitud[1].trim() : (matchHola ? matchHola[1].trim() : "DESCONOCIDO");
+            let perfilDelCorreo = matchSolicitud ? matchSolicitud[1].trim() : (matchHola ? matchHola[1].trim() : "Usuario");
 
-            // 🔥 SOLO CAMBIO AQUÍ
-            if (perfilDelCorreo !== "DESCONOCIDO") {
-
+            if (perfilDelCorreo) {
                 const perfilBusqueda = perfilDelCorreo.toLowerCase().trim();
                 const llaveSpam = `${correoCuenta}-${perfilBusqueda}`;
                 const ahora = Date.now();
 
+                // Filtro para no saturar al cliente (5 minutos entre avisos)
                 if (enviosRecientes.has(llaveSpam) && (ahora - enviosRecientes.get(llaveSpam) < 300000)) {
                     correosProcesados.add(uid);
                     continue;
                 }
 
+                // Buscamos al dueño del perfil en tu Excel
                 const coincidencias = clientes.filter(c => 
                     (c[4] || "").toLowerCase().trim() === correoCuenta && 
                     (c[6] || "").toLowerCase().trim() === perfilBusqueda
@@ -88,18 +83,16 @@ async function procesarCorreos() {
 
                 if (coincidencias.length > 0) {
                     for (let cliente of coincidencias) {
-
-                        const linkPanel = `https://codigos-production.up.railway.app/?perfil=${encodeURIComponent(perfilDelCorreo)}&cliente=${encodeURIComponent(cliente[1])}`;
-
-                        const msjCliente = `🏠 *ACTUALIZACIÓN NETFLIX*\n\nHola *${cliente[1]}*, tienes una solicitud de activación.\n\n👉 ${linkPanel}`;
-
+                        // MENSAJE CON TU LINK DEL PANEL
+                        const msjCliente = `📺 *ACTUALIZACIÓN DE HOGAR*\n\n` +
+                            `Hola *${cliente[1]}*, se ha detectado una solicitud para tu perfil *${perfilDelCorreo}*.\n\n` +
+                            `👉 *Obtén tu código aquí:* \nhttps://codigos-production.up.railway.app/`;
+                        
                         await enviarWA(cliente[2], msjCliente);
                     }
-
-                    console.log(`✅ Enviado a ${perfilDelCorreo}`);
+                    console.log(`✅ Aviso enviado a ${perfilDelCorreo} (${correoCuenta})`);
                     enviosRecientes.set(llaveSpam, ahora); 
                 }
-
                 correosProcesados.add(uid);
             }
         }
