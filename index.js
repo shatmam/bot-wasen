@@ -20,10 +20,11 @@ async function enviarWA(tel, msj) {
             headers: { "Authorization": `Bearer ${WA_TOKEN}`, "Content-Type": "application/json" },
             body: JSON.stringify({ to: "+" + numero, text: msj })
         });
-    } catch (e) { console.log("❌ Error WA:", e.message); }
+    } catch (e) { console.log("❌ Error WA Sender:", e.message); }
 }
 
 async function procesarCorreos() {
+    console.log("🔍 Iniciando búsqueda de correos...");
     const client = new ImapFlow({
         host: "imap.gmail.com", port: 993, secure: true,
         auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
@@ -34,10 +35,19 @@ async function procesarCorreos() {
         await client.connect();
         await client.mailboxOpen('INBOX');
 
-        const auth = new google.auth.GoogleAuth({
-            credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
-            scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"]
-        });
+        // Validar Credenciales de Google antes de seguir
+        let auth;
+        try {
+            auth = new google.auth.GoogleAuth({
+                credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
+                scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+            });
+        } catch (err) {
+            console.error("❌ ERROR EN GOOGLE_CREDENTIALS: Revisa que el JSON esté bien pegado en Railway.");
+            await client.logout();
+            return;
+        }
+
         const sheets = google.sheets({ version: "v4", auth });
         const spreadsheet = await sheets.spreadsheets.values.get({ 
             spreadsheetId: process.env.SPREADSHEET_ID, 
@@ -45,62 +55,62 @@ async function procesarCorreos() {
         });
         const clientes = spreadsheet.data.values || [];
 
-        // Buscamos correos de Netflix
         let list = await client.search({ from: "netflix" });
         
-        for (let seq of list.slice(-10).reverse()) {
-            let meta = await client.fetchOne(seq, { envelope: true });
-            let uid = meta.envelope.messageId;
+        // Solo procesamos los últimos 5 para no saturar memoria
+        for (let seq of list.slice(-5).reverse()) {
+            try {
+                let meta = await client.fetchOne(seq, { envelope: true });
+                let uid = meta.envelope.messageId;
 
-            if (correosProcesados.has(uid)) continue;
+                if (correosProcesados.has(uid)) continue;
 
-            let msg = await client.fetchOne(seq, { source: true });
-            let parsed = await simpleParser(msg.source);
-            let text = (parsed.text || "").replace(/\s+/g, ' '); 
-            let correoCuenta = (meta.envelope.to[0].address || "").toLowerCase().trim();
+                let msg = await client.fetchOne(seq, { source: true });
+                let parsed = await simpleParser(msg.source);
+                let text = (parsed.text || "").replace(/\s+/g, ' '); 
+                let correoCuenta = (meta.envelope.to[0].address || "").toLowerCase().trim();
 
-            // Identificamos el perfil en el texto del correo
-            const matchSolicitud = text.match(/Solicitud de\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ ]+)/i);
-            const matchHola = text.match(/Hola,\s*([^:]+):/i);
-            let perfilDelCorreo = matchSolicitud ? matchSolicitud[1].trim() : (matchHola ? matchHola[1].trim() : "Usuario");
+                const matchSolicitud = text.match(/Solicitud de\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ ]+)/i);
+                const matchHola = text.match(/Hola,\s*([^:]+):/i);
+                let perfilDelCorreo = matchSolicitud ? matchSolicitud[1].trim() : (matchHola ? matchHola[1].trim() : null);
 
-            if (perfilDelCorreo) {
-                const perfilBusqueda = perfilDelCorreo.toLowerCase().trim();
-                const llaveSpam = `${correoCuenta}-${perfilBusqueda}`;
-                const ahora = Date.now();
+                if (perfilDelCorreo) {
+                    const perfilBusqueda = perfilDelCorreo.toLowerCase().trim();
+                    const llaveSpam = `${correoCuenta}-${perfilBusqueda}`;
+                    const ahora = Date.now();
 
-                // Filtro para no saturar al cliente (5 minutos entre avisos)
-                if (enviosRecientes.has(llaveSpam) && (ahora - enviosRecientes.get(llaveSpam) < 300000)) {
-                    correosProcesados.add(uid);
-                    continue;
-                }
-
-                // Buscamos al dueño del perfil en tu Excel
-                const coincidencias = clientes.filter(c => 
-                    (c[4] || "").toLowerCase().trim() === correoCuenta && 
-                    (c[6] || "").toLowerCase().trim() === perfilBusqueda
-                );
-
-                if (coincidencias.length > 0) {
-                    for (let cliente of coincidencias) {
-                        // MENSAJE CON TU LINK DEL PANEL
-                        const msjCliente = `📺 *ACTUALIZACIÓN DE HOGAR*\n\n` +
-                            `Hola *${cliente[1]}*, se ha detectado una solicitud para tu perfil *${perfilDelCorreo}*.\n\n` +
-                            `👉 *Obtén tu código aquí:* \nhttps://codigos-production.up.railway.app/`;
-                        
-                        await enviarWA(cliente[2], msjCliente);
+                    if (enviosRecientes.has(llaveSpam) && (ahora - enviosRecientes.get(llaveSpam) < 300000)) {
+                        correosProcesados.add(uid);
+                        continue;
                     }
-                    console.log(`✅ Aviso enviado a ${perfilDelCorreo} (${correoCuenta})`);
-                    enviosRecientes.set(llaveSpam, ahora); 
+
+                    const coincidencias = clientes.filter(c => 
+                        (c[4] || "").toLowerCase().trim() === correoCuenta && 
+                        (c[6] || "").toLowerCase().trim() === perfilBusqueda
+                    );
+
+                    if (coincidencias.length > 0) {
+                        for (let cliente of coincidencias) {
+                            const msjCliente = `📺 *ACTUALIZACIÓN DE HOGAR*\n\nHola *${cliente[1]}*, detectamos una solicitud para tu perfil *${perfilDelCorreo}*.\n\n👉 *Obtén tu código aquí:* \nhttps://codigos-production.up.railway.app/`;
+                            await enviarWA(cliente[2], msjCliente);
+                        }
+                        console.log(`✅ Notificado: ${perfilDelCorreo}`);
+                        enviosRecientes.set(llaveSpam, ahora); 
+                    }
+                    correosProcesados.add(uid);
                 }
-                correosProcesados.add(uid);
+            } catch (innerError) {
+                console.log("⚠️ Error procesando un correo individual, saltando al siguiente...");
             }
         }
-        await client.logout();
     } catch (e) {
-        if (client) await client.logout().catch(() => {});
+        console.error("❌ ERROR CRÍTICO:", e.message);
+    } finally {
+        await client.logout().catch(() => {});
+        console.log("💤 Ciclo finalizado, esperando al siguiente...");
     }
 }
 
+// Ejecución inicial y bucle
 procesarCorreos();
 setInterval(procesarCorreos, RECHECK_TIME);
