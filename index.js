@@ -44,47 +44,42 @@ async function procesarCorreos() {
         });
         const clientes = spreadsheet.data.values || [];
 
-        // Buscamos los últimos correos de Netflix (leídos o no para esta prueba)
-        let list = await client.search({ from: "netflix" });
-        let ultimos = list.slice(-5).reverse(); 
+        // 🟢 FILTRO CRÍTICO: Solo correos de Netflix que NO hayan sido leídos
+        let list = await client.search({ from: "netflix", unseen: true });
 
-        for (let seq of ultimos) {
+        for (let seq of list) {
             let msg = await client.fetchOne(seq, { source: true, envelope: true });
             let parsed = await simpleParser(msg.source);
             let html = parsed.html || "";
-            let text = (parsed.text || "").replace(/\s+/g, ' '); // Limpiar espacios extra
+            let text = (parsed.text || "").replace(/\s+/g, ' '); 
             let correoCuenta = (msg.envelope.to[0].address || "").toLowerCase().trim();
 
-            // 1. MEJORADO: Detección de Perfil (Busca "Solicitud de X" o "para X")
+            // Detección de Perfil
             let perfilDelCorreo = "No detectado";
-            const regexPerfil = /(?:Solicitud de|para)\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]+)/i;
-            const matchPerfil = text.match(regexPerfil);
+            const matchPerfil = text.match(/Solicitud de\s+([a-zA-Z0-9]+)/i);
             if (matchPerfil) perfilDelCorreo = matchPerfil[1].trim().toLowerCase();
 
-            // 2. MEJORADO: Captura de Link (Busca cualquier URL de Netflix que contenga confirm o update)
+            // Detección de Link
             const regexLink = /https:\/\/www\.netflix\.com\/[^\s"<>]+(?:confirm-account|update-home)[^\s"<>]+/gi;
-            const linksEncontrados = html.match(regexLink) || text.match(regexLink);
+            const links = html.match(regexLink) || text.match(regexLink);
 
-            if (linksEncontrados) {
-                const elLink = linksEncontrados[0];
-                
-                // Buscar cliente en Excel (Col E y Col G)
-                const clienteCorrecto = clientes.find(c => {
-                    const correoExcel = (c[4] || "").toLowerCase().trim();
-                    const perfilExcel = (c[6] || "").toLowerCase().trim();
-                    return correoExcel === correoCuenta && 
-                           (perfilDelCorreo.includes(perfilExcel) || perfilExcel.includes(perfilDelCorreo));
-                });
+            if (links) {
+                const elLink = links[0];
+                const cliente = clientes.find(c => 
+                    (c[4] || "").toLowerCase().trim() === correoCuenta && 
+                    (c[6] || "").toLowerCase().trim() === perfilDelCorreo
+                );
 
-                if (clienteCorrecto) {
-                    await enviarWA(clienteCorrecto[2], `🏠 *ACTUALIZACIÓN NETFLIX*\n\nHola *${clienteCorrecto[1]}*, detectamos tu solicitud en el perfil *${perfilDelCorreo.toUpperCase()}*.\n\nPulsa aquí para activar:\n${elLink}`);
-                    await enviarWA(ADMIN_PHONE, `✅ *ENVIADO*: ${clienteCorrecto[1]} (Perfil ${perfilDelCorreo})`);
+                if (cliente) {
+                    await enviarWA(cliente[2], `🏠 *NETFLIX ACTUALIZADO*\n\nHola *${cliente[1]}*, activa tu TV aquí:\n${elLink}`);
+                    await enviarWA(ADMIN_PHONE, `✅ *ENVIADO*: ${cliente[1]} (${perfilDelCorreo})`);
                 } else {
-                    await enviarWA(ADMIN_PHONE, `⚠️ *SIN COINCIDENCIA*:\n📧 Cuenta: ${correoCuenta}\n👤 Perfil correo: "${perfilDelCorreo}"\n\nVerifica que el perfil "${perfilDelCorreo}" esté en la Columna G.`);
+                    await enviarWA(ADMIN_PHONE, `⚠️ *SIN REGISTRO*: Perfil "${perfilDelCorreo}" en ${correoCuenta}. Revisa tu Excel.`);
                 }
-            } else {
-                await enviarWA(ADMIN_PHONE, `❌ *LINK NO ENCONTRADO*: Cuenta ${correoCuenta}. Por favor, reenvía este correo a soporte.`);
             }
+
+            // 🔴 MARCAR COMO LEÍDO: Esto evita que se repita el mensaje (Adiós Spam)
+            await client.messageFlagsAdd(seq, ['\\Seen']);
         }
         await client.logout();
     } catch (e) {
@@ -92,5 +87,6 @@ async function procesarCorreos() {
     }
 }
 
+// Ejecutar cada 20 segundos
 procesarCorreos();
 setInterval(procesarCorreos, 20000);
