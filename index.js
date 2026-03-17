@@ -6,7 +6,7 @@ const fetch = require("node-fetch");
 
 const ADMIN_PHONE = process.env.ADMIN_PHONE; 
 const WA_TOKEN = process.env.WA_TOKEN;
-const RECHECK_TIME = 1 * 60 * 1000; // Revisión cada 1 minuto
+const RECHECK_TIME = 1 * 60 * 1000; 
 
 const correosProcesados = new Set();
 let botIniciado = false;
@@ -46,12 +46,12 @@ async function procesarCorreos() {
         const clientes = spreadsheet.data.values || [];
 
         if (!botIniciado) {
-            await enviarWA(ADMIN_PHONE, `🚀 *BOT ACTIVO*: Escaneando ${clientes.length} clientes cada minuto.`);
+            await enviarWA(ADMIN_PHONE, `📡 *AUDITORÍA ACTIVA*\nClientes: ${clientes.length}\nRevisando últimos 3 de Netflix...`);
             botIniciado = true;
         }
 
         let list = await client.search({ from: "netflix" });
-        let ultimos = list.slice(-5); // Solo mira los 5 más recientes para ahorrar recursos
+        let ultimos = list.slice(-3); 
 
         for (let seq of ultimos) {
             if (correosProcesados.has(seq)) continue;
@@ -62,31 +62,33 @@ async function procesarCorreos() {
             let html = parsed.html || "";
             let correoCuenta = (msg.envelope.to[0].address || "").toLowerCase().trim();
 
-            // 🎯 CAPTURA DE PERFIL: Prioriza el texto "Solicitud de X" del cuadro rojo
-            const matchSolicitud = text.match(/Solicitud de\s+([a-zA-Z0-9]+)/i);
-            let perfilDelCorreo = matchSolicitud ? matchSolicitud[1].trim().toLowerCase() : null;
+            // 🔍 EXTRACCIÓN AGRESIVA DE PERFIL
+            const matchSolicitud = text.match(/Solicitud de\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]+)/i);
+            const matchHola = text.match(/Hola,\s*([^:]+):/i);
+            let perfilDelCorreo = matchSolicitud ? matchSolicitud[1].trim() : (matchHola ? matchHola[1].trim() : "DESCONOCIDO");
 
-            // 🎯 CAPTURA DE LINK
+            // 🔗 EXTRACCIÓN DE LINK
             const regexLink = /https:\/\/www\.netflix\.com\/[^\s"<>]+(?:confirm-account|update-home)[^\s"<>]+/gi;
             const links = html.match(regexLink) || text.match(regexLink);
+            const elLink = links ? links[0] : null;
 
-            if (perfilDelCorreo && links) {
-                const elLink = links[0];
-                // Busca en Excel: Col E (Cuenta) y Col G (Perfil)
+            // 📢 NOTIFICACIÓN OBLIGATORIA AL ADMIN
+            let reporte = `📩 *CORREO DETECTADO*\n📧 Cuenta: ${correoCuenta}\n👤 Perfil: "${perfilDelCorreo}"\n🔗 Link: ${elLink ? "✅ OK" : "❌ NO ENCONTRADO"}`;
+            await enviarWA(ADMIN_PHONE, reporte);
+
+            if (elLink && perfilDelCorreo !== "DESCONOCIDO") {
                 const cliente = clientes.find(c => 
                     (c[4] || "").toLowerCase().trim() === correoCuenta && 
-                    (c[6] || "").toLowerCase().trim() === perfilDelCorreo
+                    (c[6] || "").toLowerCase().trim() === perfilDelCorreo.toLowerCase()
                 );
 
                 if (cliente) {
-                    // Envía al cliente usando el número de la Columna C
-                    await enviarWA(cliente[2], `🏠 *SOLICITUD NETFLIX*\n\nHola *${cliente[1]}*, activa tu TV aquí:\n${elLink}`);
-                    await enviarWA(ADMIN_PHONE, `✅ *ENVIADO*: ${cliente[1]} (${perfilDelCorreo}) para ${correoCuenta}`);
+                    await enviarWA(cliente[2], `🏠 *ACTIVA TU TV*\n\nHola *${cliente[1]}*, dale clic aquí:\n${elLink}`);
+                    await enviarWA(ADMIN_PHONE, `✅ *ENVIADO A*: ${cliente[1]}`);
                 } else {
-                    await enviarWA(ADMIN_PHONE, `⚠️ *SIN REGISTRO*: Perfil "${perfilDelCorreo}" en cuenta ${correoCuenta}. No está en tu Excel.`);
+                    await enviarWA(ADMIN_PHONE, `⚠️ *SIN DUEÑO*: Revisa que en el Excel diga "${perfilDelCorreo}" en la columna G para ${correoCuenta}`);
                 }
             }
-            // Marca como procesado en memoria para no repetir
             correosProcesados.add(seq);
         }
         await client.logout();
