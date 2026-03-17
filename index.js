@@ -9,16 +9,34 @@ const WA_TOKEN = process.env.WA_TOKEN;
 const RECHECK_TIME = 1 * 60 * 1000; 
 
 const correosProcesados = new Set();
-const enviosRecientes = new Map(); // Para evitar spam por perfil/cuenta
+const enviosRecientes = new Map(); 
 
-async function enviarWA(tel, msj) {
+// Función actualizada para enviar BOTONES
+async function enviarWA(tel, msj, btnLink = null) {
     try {
         let numero = tel.toString().replace(/[^0-9]/g, "");
         if (!numero.startsWith("1") && numero.length === 10) numero = "1" + numero;
+
+        const body = {
+            to: "+" + numero,
+            text: msj
+        };
+
+        // Si hay un link, creamos el botón
+        if (btnLink) {
+            body.buttons = [
+                {
+                    type: "url",
+                    display: "✅ ACTIVAR AHORA",
+                    url: btnLink
+                }
+            ];
+        }
+
         await fetch("https://www.wasenderapi.com/api/send-message", {
             method: "POST",
             headers: { "Authorization": `Bearer ${WA_TOKEN}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ to: "+" + numero, text: msj })
+            body: JSON.stringify(body)
         });
     } catch (e) { console.log("❌ Error WA:", e.message); }
 }
@@ -45,9 +63,10 @@ async function procesarCorreos() {
         });
         const clientes = spreadsheet.data.values || [];
 
+        // Buscamos correos de Netflix
         let list = await client.search({ from: "netflix" });
         
-        for (let seq of list.slice(-10).reverse()) {
+        for (let seq of list.slice(-15).reverse()) {
             let meta = await client.fetchOne(seq, { envelope: true });
             let uid = meta.envelope.messageId;
 
@@ -59,12 +78,16 @@ async function procesarCorreos() {
             let text = (parsed.text || "").replace(/\s+/g, ' '); 
             let correoCuenta = (meta.envelope.to[0].address || "").toLowerCase().trim();
 
-            const linkMatch = htmlOriginal.match(/href="([^"]*update-home[^"]*)"/) || 
-                              htmlOriginal.match(/href="([^"]*confirm-account[^"]*)"/) || 
-                              htmlOriginal.match(/href="([^"]*netflix.com\/browse[^"]*)"/);
-            const elLink = linkMatch ? linkMatch[1] : null;
+            // 1. RECONOCIMIENTO DE LINK (Hogar, Temporal y el link largo que pasaste)
+            const linkMatch = htmlOriginal.match(/href="([^"]*update-primary-location[^"]*)"/) || 
+                              htmlOriginal.match(/href="([^"]*update-home[^"]*)"/) || 
+                              htmlOriginal.match(/href="([^"]*pin-code[^"]*)"/) || 
+                              htmlOriginal.match(/href="([^"]*confirm-account[^"]*)"/);
+            
+            const elLink = linkMatch ? linkMatch[1].replace(/&amp;/g, "&") : null;
 
-            const matchSolicitud = text.match(/Solicitud de\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]+)/i);
+            // 2. EXTRACCIÓN DE PERFIL
+            const matchSolicitud = text.match(/Solicitud de\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ ]+?)(?=\s+para|\.|$)/i);
             const matchHola = text.match(/Hola,\s*([^:]+):/i);
             let perfilDelCorreo = matchSolicitud ? matchSolicitud[1].trim() : (matchHola ? matchHola[1].trim() : "DESCONOCIDO");
 
@@ -73,12 +96,13 @@ async function procesarCorreos() {
                 const llaveSpam = `${correoCuenta}-${perfilBusqueda}`;
                 const ahora = Date.now();
 
-                // 🛡️ FILTRO ANTI-SPAM: Si ya se envió un link para este perfil en los últimos 5 min, saltar
-                if (enviosRecientes.has(llaveSpam) && (ahora - enviosRecientes.get(llaveSpam) < 300000)) {
+                // Evitar spam: solo 1 mensaje por perfil cada 3 minutos
+                if (enviosRecientes.has(llaveSpam) && (ahora - enviosRecientes.get(llaveSpam) < 180000)) {
                     correosProcesados.add(uid);
                     continue;
                 }
 
+                // Filtramos la hoja completa buscando Correo + Perfil
                 const clientesEncontrados = clientes.filter(c => 
                     (c[4] || "").toLowerCase().trim() === correoCuenta && 
                     (c[6] || "").toLowerCase().trim() === perfilBusqueda
@@ -86,13 +110,16 @@ async function procesarCorreos() {
 
                 if (clientesEncontrados.length > 0) {
                     for (let cliente of clientesEncontrados) {
-                        const msjCliente = `🏠 *ACTUALIZACIÓN NETFLIX*\n\nHola *${cliente[1]}*, pulsa el botón para activar tu TV:\n\n${elLink}`;
-                        await enviarWA(cliente[2], msjCliente);
+                        const esTemporal = elLink.includes("pin-code");
+                        const txt = `📺 *NETFLIX: ${esTemporal ? 'ACCESO TEMPORAL' : 'ACTUALIZAR HOGAR'}*\n\nHola *${cliente[1]}*, detectamos tu solicitud para el perfil *${perfilDelCorreo}*.\n\nUsa el botón de abajo para activar:`;
+                        
+                        // Enviamos con botón
+                        await enviarWA(cliente[2], txt, elLink);
                     }
-                    await enviarWA(ADMIN_PHONE, `✅ *ENVIADO*: ${perfilDelCorreo} (${correoCuenta})`);
-                    enviosRecientes.set(llaveSpam, ahora); // Registramos el envío
+                    await enviarWA(ADMIN_PHONE, `✅ *BOTÓN ENVIADO*: ${perfilDelCorreo} (${correoCuenta})`);
+                    enviosRecientes.set(llaveSpam, ahora);
                 } else {
-                    await enviarWA(ADMIN_PHONE, `⚠️ *SIN COINCIDENCIA*: Perfil "${perfilDelCorreo}" en cuenta ${correoCuenta} no existe en Excel.`);
+                    await enviarWA(ADMIN_PHONE, `⚠️ *SIN COINCIDENCIA*: "${perfilDelCorreo}" en ${correoCuenta}.`);
                 }
                 correosProcesados.add(uid);
             }
