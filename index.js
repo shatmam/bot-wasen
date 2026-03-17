@@ -6,8 +6,9 @@ const fetch = require("node-fetch");
 
 const ADMIN_PHONE = process.env.ADMIN_PHONE; 
 const WA_TOKEN = process.env.WA_TOKEN;
-const RECHECK_TIME = 1 * 60 * 1000; // 1 minuto entre chequeos
+const RECHECK_TIME = 1 * 60 * 1000; 
 
+// Esta memoria evita duplicados en la misma sesión
 const correosProcesados = new Set();
 const enviosRecientes = new Map();
 
@@ -20,11 +21,11 @@ async function enviarWA(tel, msj) {
             headers: { "Authorization": `Bearer ${WA_TOKEN}`, "Content-Type": "application/json" },
             body: JSON.stringify({ to: "+" + numero, text: msj })
         });
-    } catch (e) { console.log("❌ Error WA:", e.message); }
+    } catch (e) { console.log("❌ Error enviando WhatsApp:", e.message); }
 }
 
 async function procesarCorreos() {
-    console.log("🔍 Escaneando últimos 15 correos de Netflix...");
+    console.log("--- 🚀 Iniciando Escaneo de Bandeja ---");
     const client = new ImapFlow({
         host: "imap.gmail.com", port: 993, secure: true,
         auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
@@ -46,27 +47,31 @@ async function procesarCorreos() {
         });
         const clientes = spreadsheet.data.values || [];
 
-        // Buscamos correos de Netflix (leídos y no leídos)
+        // Buscamos los correos de Netflix
         let list = await client.search({ from: "netflix" });
+        let ultimosCorreos = list.slice(-15); // Los 15 más nuevos
         
-        // Tomamos los últimos 15 correos para asegurar que no se pierda nada
-        for (let seq of list.slice(-15).reverse()) {
+        console.log(`Bandeja analizada. Encontrados ${ultimosCorreos.length} correos potenciales.`);
+
+        for (let seq of ultimosCorreos.reverse()) {
             try {
-                let meta = await client.fetchOne(seq, { envelope: true });
-                let uid = meta.envelope.messageId;
+                let msgData = await client.fetchOne(seq, { envelope: true, source: true });
+                let uid = msgData.envelope.messageId;
 
-                // SI YA SE PROCESÓ EN ESTA SESIÓN, SALTAR
-                if (correosProcesados.has(uid)) continue;
+                // Si ya lo enviamos antes, pasamos al siguiente inmediatamente
+                if (correosProcesados.has(uid)) {
+                    console.log(`⏭️ Correo ${uid} ya procesado anteriormente. saltando...`);
+                    continue;
+                }
 
-                let msg = await client.fetchOne(seq, { source: true });
-                let parsed = await simpleParser(msg.source);
+                let parsed = await simpleParser(msgData.source);
                 let text = (parsed.text || "").replace(/\s+/g, ' '); 
-                let subject = (meta.envelope.subject || "").toLowerCase();
-                let correoCuenta = (meta.envelope.to[0].address || "").toLowerCase().trim();
+                let subject = (msgData.envelope.subject || "").toLowerCase();
+                let correoCuenta = (msgData.envelope.to[0].address || "").toLowerCase().trim();
 
-                // FILTRO: Solo procesar si es Hogar o Acceso Temporal
-                const esHogar = text.includes("hogar") || subject.includes("hogar");
-                const esTemporal = text.includes("temporal") || subject.includes("temporal");
+                // Filtro de palabras clave
+                const esHogar = text.includes("hogar") || subject.includes("hogar") || text.includes("update-home");
+                const esTemporal = text.includes("temporal") || subject.includes("temporal") || text.includes("código");
 
                 if (esHogar || esTemporal) {
                     const matchSolicitud = text.match(/Solicitud de\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ ]+)/i);
@@ -78,8 +83,9 @@ async function procesarCorreos() {
                         const llaveSpam = `${correoCuenta}-${perfilBusqueda}`;
                         const ahora = Date.now();
 
-                        // ANTISPAM: 5 minutos por perfil
+                        // Anti-Spam: No enviar al mismo perfil más de una vez cada 5 min
                         if (enviosRecientes.has(llaveSpam) && (ahora - enviosRecientes.get(llaveSpam) < 300000)) {
+                            console.log(`⏳ Perfil ${perfilDelCorreo} en espera por antispam.`);
                             correosProcesados.add(uid);
                             continue;
                         }
@@ -92,27 +98,29 @@ async function procesarCorreos() {
                         if (coincidencias.length > 0) {
                             for (let cliente of coincidencias) {
                                 const msjCliente = `📺 *ACTUALIZACIÓN NETFLIX*\n\n` +
-                                    `Hola *${cliente[1]}*, detectamos una solicitud de *Hogar o Acceso Temporal* para tu perfil *${perfilDelCorreo}*.\n\n` +
+                                    `Hola *${cliente[1]}*, detectamos una solicitud para tu perfil *${perfilDelCorreo}*.\n\n` +
                                     `👉 *Obtén tu código aquí:* \nhttps://codigos-production.up.railway.app/`;
                                 
                                 await enviarWA(cliente[2], msjCliente);
+                                console.log(`📧 WhatsApp enviado a: ${cliente[1]} (${perfilDelCorreo})`);
                             }
-                            console.log(`✅ Notificado: ${perfilDelCorreo} (${correoCuenta})`);
                             enviosRecientes.set(llaveSpam, ahora); 
+                        } else {
+                            console.log(`❓ Solicitud detectada pero perfil "${perfilDelCorreo}" no está en el Excel.`);
                         }
-                        // Marcamos como procesado para no repetir
+                        // Importante: Marcar como procesado para que no se repita en el próximo ciclo
                         correosProcesados.add(uid);
                     }
                 }
             } catch (err) {
-                console.log("⚠️ Error en correo individual, continuando...");
+                console.log("⚠️ Error procesando un mensaje específico:", err.message);
             }
         }
     } catch (e) {
-        console.error("❌ ERROR CRÍTICO:", e.message);
+        console.error("❌ ERROR GENERAL:", e.message);
     } finally {
         await client.logout().catch(() => {});
-        console.log("💤 Ciclo completado.");
+        console.log("--- ✅ Ciclo Terminado ---");
     }
 }
 
