@@ -6,12 +6,12 @@ const fetch = require("node-fetch");
 
 const ADMIN_PHONE = process.env.ADMIN_PHONE; 
 const WA_TOKEN = process.env.WA_TOKEN;
-const RECHECK_TIME = 1 * 60 * 1000; 
+const RECHECK_TIME = 1 * 60 * 1000; // 1 minuto
 
 const correosProcesados = new Set();
 let botIniciado = false;
 
-// Limpieza para comparar perfil (Columna G)
+// Limpieza de perfil para comparar con la Columna G del Excel
 function limpiarPerfil(texto) {
     if (!texto) return "";
     return texto.replace(/Solicitud de/i, "").trim().toLowerCase();
@@ -40,6 +40,7 @@ async function procesarCorreos() {
         await client.connect();
         await client.mailboxOpen('INBOX');
 
+        // Cargar Base de Datos de Google Sheets
         const auth = new google.auth.GoogleAuth({
             credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
             scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"]
@@ -52,54 +53,66 @@ async function procesarCorreos() {
         const todosLosClientes = spreadsheet.data.values || [];
 
         if (!botIniciado) {
-            await enviarWA(ADMIN_PHONE, `✅ *BOT DE ENVÍO DIRECTO ACTIVO*\nEnviando links a clientes según su perfil.`);
+            await enviarWA(ADMIN_PHONE, `📡 *BOT DE FILTRADO ACTIVO*\nBuscando correos de Hogar y Acceso Temporal.`);
             botIniciado = true;
         }
 
-        let list = await client.search({ from: "netflix" });
+        // Buscar correos NO LEÍDOS de Netflix
+        let list = await client.search({ seen: false, from: "netflix" });
 
-        for (let seq of list.slice(-5).reverse()) {
+        for (let seq of list) {
             if (correosProcesados.has(seq)) continue;
 
             let msg = await client.fetchOne(seq, { source: true, envelope: true });
             let parsed = await simpleParser(msg.source);
+            let subject = (parsed.subject || "").toLowerCase();
             let htmlOriginal = parsed.html || "";
             let text = (parsed.text || "").replace(/\s+/g, ' '); 
             let correoCuenta = (msg.envelope.to[0].address || "").toLowerCase().trim();
 
-            // 1. Extraer Link
-            const linkMatch = htmlOriginal.match(/href="([^"]*pin-code[^"]*)"/) || 
-                              htmlOriginal.match(/href="([^"]*update-home[^"]*)"/) || 
-                              htmlOriginal.match(/href="([^"]*confirm-account[^"]*)"/);
-            
-            let elLink = linkMatch ? linkMatch[1].replace(/&amp;/g, "&") : null;
+            // FILTRO: Solo procesar si es Hogar o Acceso Temporal
+            const esHogar = subject.includes("hogar") || text.includes("hogar");
+            const esTemporal = subject.includes("temporal") || text.includes("código de acceso") || text.includes("pin-code");
 
-            // 2. Extraer Perfil
-            const matchPerfil = text.match(/Solicitud de ([^ ]+)/i) || text.match(/Hola, ([^:]+):/i);
-            let perfilNombre = matchPerfil ? matchPerfil[1].trim() : "DESCONOCIDO";
+            if (esHogar || esTemporal) {
+                // 1. Extraer el Enlace (href)
+                const linkMatch = htmlOriginal.match(/href="([^"]*update-home[^"]*)"/) || 
+                                  htmlOriginal.match(/href="([^"]*pin-code[^"]*)"/) || 
+                                  htmlOriginal.match(/href="([^"]*confirm-account[^"]*)"/);
+                
+                let elLink = linkMatch ? linkMatch[1].replace(/&amp;/g, "&") : null;
 
-            if (elLink && perfilNombre !== "DESCONOCIDO") {
-                const perfilBusqueda = limpiarPerfil(perfilNombre);
+                // 2. Identificar el Perfil (Solicitud de...)
+                const matchPerfil = text.match(/Solicitud de ([^ ]+)/i) || text.match(/Hola, ([^:]+):/i);
+                let perfilNombre = matchPerfil ? matchPerfil[1].trim() : "Desconocido";
 
-                // 3. Buscar en Excel (Mismo Correo + Mismo Perfil)
-                const cliente = todosLosClientes.find(fila => {
-                    let correoFila = (fila[4] || "").toLowerCase().trim();
-                    let perfilFila = limpiarPerfil(fila[6] || "");
-                    return correoFila === correoCuenta && perfilFila === perfilBusqueda;
-                });
+                if (elLink) {
+                    const perfilBusqueda = limpiarPerfil(perfilNombre);
 
-                if (cliente) {
-                    // 4. Enviar link al cliente
-                    const mensaje = `🏠 *SOLICITUD NETFLIX*\n\nHola *${cliente[1]}*, detectamos tu solicitud en el perfil *${perfilNombre}*.\n\nPulsa el botón de abajo para activar tu acceso:\n${elLink}`;
-                    await enviarWA(cliente[2], mensaje);
-                    
-                    // Reporte al Admin
-                    await enviarWA(ADMIN_PHONE, `✅ *LINK ENVIADO*: ${cliente[1]} (${perfilNombre}) recibio su link de activación.`);
-                } else {
-                    await enviarWA(ADMIN_PHONE, `⚠️ *NO ENCONTRADO*: Se recibió solicitud de "${perfilNombre}" en ${correoCuenta}, pero no está en el Excel.`);
+                    // 3. Buscar en el Excel (Doble Filtro: Correo + Perfil)
+                    const cliente = todosLosClientes.find(fila => {
+                        let correoFila = (fila[4] || "").toLowerCase().trim();
+                        let perfilFila = limpiarPerfil(fila[6] || "");
+                        return correoFila === correoCuenta && perfilFila === perfilBusqueda;
+                    });
+
+                    if (cliente) {
+                        const tipo = esTemporal ? "ACCESO TEMPORAL" : "ACTUALIZACIÓN DE HOGAR";
+                        const mensaje = `📺 *SOLICITUD DE ${tipo}*\n\nHola *${cliente[1]}*, detectamos tu solicitud para el perfil *${perfilNombre}*.\n\nPulsa el siguiente enlace para activar tu TV:\n${elLink}`;
+                        
+                        await enviarWA(cliente[2], mensaje);
+                        
+                        // Informar al Admin
+                        await enviarWA(ADMIN_PHONE, `✅ *ENVIADO*: ${cliente[1]} (${perfilNombre})\n📧 Cuenta: ${correoCuenta}\n📌 Tipo: ${tipo}`);
+                    } else {
+                        // Informar al Admin si no hay coincidencia
+                        await enviarWA(ADMIN_PHONE, `⚠️ *CLIENTE NO ENCONTRADO*\n📧 Cuenta: ${correoCuenta}\n👤 Perfil: ${perfilNombre}\n❌ No está registrado en el Excel.`);
+                    }
                 }
             }
             correosProcesados.add(seq);
+            // Marcar como leído para no repetir en la siguiente vuelta
+            await client.messageFlagsAdd(seq, ['\\Seen']);
         }
         await client.logout();
     } catch (e) { if (client) await client.logout().catch(() => {}); }
