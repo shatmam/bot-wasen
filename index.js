@@ -19,16 +19,13 @@ const enviosRecientes = new Map();
 // 🔥 CREAR PDF
 async function crearPDF(contenido, nombreArchivo) {
     return new Promise((resolve, reject) => {
-        const doc = new PDFDocument({ margin: 40 });
+        const doc = new PDFDocument();
         const stream = fs.createWriteStream(nombreArchivo);
 
         doc.pipe(stream);
 
-        // Título
-        doc.fontSize(18).text("📩 NETFLIX - CORREO RECIBIDO", { align: "center" });
+        doc.fontSize(16).text("📩 NETFLIX", { align: "center" });
         doc.moveDown();
-
-        // Contenido
         doc.fontSize(12).text(contenido, {
             align: "left"
         });
@@ -40,7 +37,7 @@ async function crearPDF(contenido, nombreArchivo) {
     });
 }
 
-// 🔥 ENVIAR PDF POR WHATSAPP
+// 🔥 ENVIAR PDF
 async function enviarPDF(tel, archivo) {
     try {
         let numero = tel.toString().replace(/[^0-9]/g, "");
@@ -49,7 +46,7 @@ async function enviarPDF(tel, archivo) {
         const form = new FormData();
         form.append("to", "+" + numero);
         form.append("file", fs.createReadStream(archivo));
-        form.append("caption", "📄 Correo de Netflix");
+        form.append("caption", "📩 Correo de Netflix");
 
         await fetch("https://www.wasenderapi.com/api/send-file", {
             method: "POST",
@@ -67,12 +64,9 @@ async function enviarPDF(tel, archivo) {
 
 async function procesarCorreos() {
     const client = new ImapFlow({
-        host: "imap.gmail.com",
-        port: 993,
-        secure: true,
+        host: "imap.gmail.com", port: 993, secure: true,
         auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
-        logger: false,
-        tls: { rejectUnauthorized: false }
+        logger: false, tls: { rejectUnauthorized: false }
     });
 
     try {
@@ -94,7 +88,7 @@ async function procesarCorreos() {
         const clientes = spreadsheet.data.values || [];
 
         let list = await client.search({ from: "netflix" });
-
+        
         for (let seq of list.slice(-10).reverse()) {
 
             let meta = await client.fetchOne(seq, { envelope: true });
@@ -105,7 +99,7 @@ async function procesarCorreos() {
             let msg = await client.fetchOne(seq, { source: true });
             let parsed = await simpleParser(msg.source);
 
-            let text = (parsed.text || "").replace(/\s+/g, ' ');
+            let text = (parsed.text || "").replace(/\s+/g, ' '); 
             let correoCuenta = (meta.envelope.to[0].address || "").toLowerCase().trim();
 
             const matchSolicitud = text.match(/Solicitud de\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ ]+)/i);
@@ -143,7 +137,7 @@ async function procesarCorreos() {
 
                         await enviarPDF(cliente[2], nombreArchivo);
 
-                        // eliminar archivo después de enviar
+                        // borrar PDF después de enviar
                         fs.unlinkSync(nombreArchivo);
                     }
 
