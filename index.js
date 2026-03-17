@@ -58,29 +58,31 @@ async function procesarCorreos() {
             
             let htmlRaw = parsed.html || "";
 
-            // 🔥 FIX DEFINITIVO DEL LINK (ÚNICO CAMBIO)
+            // 🔥 FIX DEFINITIVO DEL LINK
             let htmlLimpio = htmlRaw
                 .replace(/=\r?\n/g, "")   // reconstruye líneas cortadas
                 .replace(/&amp;/g, "&");
 
-            // extraer TODOS los href reales
+            // extraer TODOS los href
             const hrefs = [...htmlLimpio.matchAll(/href="([^"]+)"/gi)].map(m => m[1]);
 
             // filtrar SOLO el correcto
             const linkBueno = hrefs.find(l => 
-                l.includes("netflix.com") &&
-                (l.includes("update-primary-location") || l.includes("update-home"))
+                l.includes("update-primary-location") || 
+                l.includes("update-home")
             );
 
-            const elLink = linkBueno
-                ? linkBueno
+            let elLink = null;
+
+            if (linkBueno) {
+                elLink = linkBueno
                     .replace(/=\r?\n/g, "")
                     .replace(/\s/g, "")
-                    .trim()
-                : null;
+                    .trim();
+            }
 
-            // 🧪 debug (puedes quitar luego)
-            console.log("✅ LINK FINAL:", elLink);
+            // 🧪 debug
+            console.log("🔗 LINK FINAL:", elLink);
 
             let text = (parsed.text || "").replace(/\s+/g, ' '); 
             let correoCuenta = (meta.envelope.to[0].address || "").toLowerCase().trim();
