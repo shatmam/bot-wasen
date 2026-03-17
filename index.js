@@ -9,7 +9,7 @@ const EMAIL_PASS = process.env.EMAIL_PASS;
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID; 
 const WA_TOKEN = process.env.WA_TOKEN; 
 const ADMIN_PHONE = process.env.ADMIN_PHONE; 
-const RECHECK_TIME = 15 * 1000; // 🚀 Revisión cada 15 segundos
+const RECHECK_TIME = 15 * 1000; 
 
 let botIniciado = false;
 
@@ -26,7 +26,7 @@ async function enviarWA(tel, msj) {
 }
 
 async function procesarCorreos() {
-    console.log("⚡ Escaneando...");
+    console.log("⚡ Escaneando últimos correos...");
     const client = new ImapFlow({
         host: "imap.gmail.com", port: 993, secure: true,
         auth: { user: EMAIL_USER, pass: EMAIL_PASS },
@@ -48,29 +48,28 @@ async function procesarCorreos() {
         });
         const clientes = spreadsheet.data.values || [];
 
+        // Mantenemos el conteo que te funcionó
         if (!botIniciado) {
-            await enviarWA(ADMIN_PHONE, `🚀 *BOT ACTIVO (MODO RÁPIDO)*\nComparando Correo + Perfil (Col. G)\nFrecuencia: 15 seg.`);
+            await enviarWA(ADMIN_PHONE, `🚀 *BOT MODO PRUEBA ACTIVO*\n\n📊 *Clientes leídos*: ${clientes.length}\n⏱️ *Frecuencia*: 15 seg.\n📂 *Rango*: Últimos 2 correos (Leídos o no).`);
             botIniciado = true;
         }
 
-        let list = await client.search({ from: "netflix", unseen: true });
-
-        for (let seq of list) {
+        // Buscamos los correos de Netflix (quitamos el filtro de 'unseen')
+        let list = await client.search({ from: "netflix" });
+        
+        // Solo tomamos los últimos 2 para la prueba
+        for (let seq of list.slice(-2).reverse()) {
             let msg = await client.fetchOne(seq, { source: true, envelope: true });
             let parsed = await simpleParser(msg.source);
             
-            // Extraemos texto y HTML
             let contenido = (parsed.text || "").toLowerCase();
             let html = parsed.html || parsed.textAsHtml || "";
             let correoCuenta = (msg.envelope.to[0].address || "").toLowerCase().trim();
 
-            // --- LÓGICA DE DETECCIÓN DE PERFIL ---
-            // Captura cualquier cosa después de "solicitud de" hasta encontrar una coma o salto de línea
             const perfilMatch = contenido.match(/solicitud de\s+([^\n,]+)/i);
             let perfilDelCorreo = perfilMatch ? perfilMatch[1].trim().toLowerCase() : null;
 
             if (perfilDelCorreo) {
-                // Buscamos en el Excel: Correo (Col E / c[4]) y Perfil (Col G / c[6])
                 const clienteCorrecto = clientes.find(c => 
                     (c[4] || "").toLowerCase().trim() === correoCuenta && 
                     (c[6] || "").toLowerCase().trim() === perfilDelCorreo
@@ -82,21 +81,19 @@ async function procesarCorreos() {
 
                     if (linkMatch) {
                         const elLink = linkMatch[1];
-                        const msj = `🏠 *ACTUALIZACIÓN NETFLIX*\n\n` +
-                                   `Hola *${clienteCorrecto[1]}*, detectamos tu solicitud para el perfil: *${perfilDelCorreo.toUpperCase()}*.\n\n` +
-                                   `Haz clic aquí para activar:\n${elLink}`;
+                        const msj = `🏠 *PRUEBA DE ACTIVACIÓN*\n\nHola *${clienteCorrecto[1]}*, detectamos tu solicitud para el perfil: *${perfilDelCorreo.toUpperCase()}*.\n\nPulsa aquí:\n${elLink}`;
                         
                         await enviarWA(clienteCorrecto[2], msj);
-                        await enviarWA(ADMIN_PHONE, `✅ *ENVIADO*: ${clienteCorrecto[1]} (Perfil: ${perfilDelCorreo})`);
+                        await enviarWA(ADMIN_PHONE, `✅ *PRUEBA EXITOSA*: Enviado a ${clienteCorrecto[1]} (Perfil: ${perfilDelCorreo})`);
                     }
                 } else {
-                    await enviarWA(ADMIN_PHONE, `⚠️ *SIN DUEÑO*: Perfil "${perfilDelCorreo}" en cuenta ${correoCuenta} no existe en Excel.`);
+                    console.log(`Perfil ${perfilDelCorreo} no coincide para la cuenta ${correoCuenta}`);
                 }
             }
-            await client.messageFlagsAdd(seq, ['\\Seen']);
         }
         await client.logout();
     } catch (e) {
+        console.log("❌ Error:", e.message);
         if (client) await client.logout().catch(() => {});
     }
 }
