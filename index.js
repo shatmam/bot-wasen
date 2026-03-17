@@ -1,15 +1,8 @@
 require('dotenv').config();
-const express = require("express");
-const path = require("path");
 const { ImapFlow } = require("imapflow");
 const { simpleParser } = require('mailparser');
 const { google } = require("googleapis");
 const fetch = require("node-fetch");
-
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-app.use(express.static(path.join(__dirname, "public")));
 
 // ================= CONFIGURACIÓN =================
 const EMAIL_USER = process.env.EMAIL_USER; 
@@ -17,35 +10,23 @@ const EMAIL_PASS = process.env.EMAIL_PASS;
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID; 
 const WA_TOKEN = process.env.WA_TOKEN; 
 const ADMIN_PHONE = process.env.ADMIN_PHONE; 
+const RECHECK_TIME = 1 * 60 * 1000; // 1 minuto
 
 async function enviarWA(tel, msj) {
     try {
         let numero = tel.toString().replace(/[^0-9]/g, "");
-        // Asegurar formato internacional sin el "+" (Wasender estándar)
         if (!numero.startsWith("1") && numero.length === 10) numero = "1" + numero;
         
-        console.log(`Intentando enviar a: ${numero}`);
-
-        const response = await fetch("https://www.wasenderapi.com/api/send-message", {
+        await fetch("https://www.wasenderapi.com/api/send-message", {
             method: "POST",
-            headers: { 
-                "Authorization": `Bearer ${WA_TOKEN}`, 
-                "Content-Type": "application/json" 
-            },
-            body: JSON.stringify({ 
-                to: numero, 
-                text: msj 
-            })
+            headers: { "Authorization": `Bearer ${WA_TOKEN}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ to: numero, text: msj })
         });
-        
-        const resData = await response.json();
-        console.log("Resultado API WhatsApp:", resData);
-    } catch (e) { 
-        console.log("❌ Error WA:", e.message); 
-    }
+    } catch (e) { console.log("❌ Error WA:", e.message); }
 }
 
-app.get("/api/emails", async (req, res) => {
+async function procesarCorreos() {
+    console.log("🔍 Revisando Gmail...");
     const client = new ImapFlow({
         host: "imap.gmail.com", port: 993, secure: true,
         auth: { user: EMAIL_USER, pass: EMAIL_PASS },
@@ -56,77 +37,70 @@ app.get("/api/emails", async (req, res) => {
         await client.connect();
         await client.mailboxOpen('INBOX');
 
-        let todosLosClientes = [];
-        try {
-            const auth = new google.auth.GoogleAuth({
-                credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
-                scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"]
-            });
-            const sheets = google.sheets({ version: "v4", auth });
-            const spreadsheet = await sheets.spreadsheets.values.get({ 
-                spreadsheetId: SPREADSHEET_ID, 
-                range: "Clientes!A2:K1000" 
-            });
-            todosLosClientes = spreadsheet.data.values || [];
-            console.log(`Clientes cargados: ${todosLosClientes.length}`);
-        } catch (e) { 
-            console.log("Error Sheets:", e.message);
-            await enviarWA(ADMIN_PHONE, `❌ ERROR GOOGLE SHEETS: ${e.message}`);
+        const auth = new google.auth.GoogleAuth({
+            credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
+            scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+        });
+        const sheets = google.sheets({ version: "v4", auth });
+        const spreadsheet = await sheets.spreadsheets.values.get({ 
+            spreadsheetId: SPREADSHEET_ID, 
+            range: "Clientes!A2:K1000" 
+        });
+        const clientes = spreadsheet.data.values || [];
+
+        // Buscar solo correos NO LEÍDOS de Netflix
+        let list = await client.search({ from: "netflix", unseen: true });
+
+        if (list.length > 0) {
+            console.log(`📩 Se encontraron ${list.length} correos nuevos.`);
         }
-        
-        let emailsParaMostrar = [];
-        // Buscamos correos de Netflix
-        let list = await client.search({ from: "netflix" });
-        console.log(`Correos encontrados: ${list.length}`);
 
-        // Revisamos los últimos 15 correos para mayor margen
-        for (let seq of list.slice(-15).reverse()) {
+        for (let seq of list) {
             let msg = await client.fetchOne(seq, { source: true, envelope: true });
-            let subject = (msg.envelope.subject || "").toLowerCase();
             let parsed = await simpleParser(msg.source);
+            let subject = (msg.envelope.subject || "").toLowerCase();
+            let html = parsed.html || parsed.textAsHtml || "";
             let contenido = (parsed.text || "").toLowerCase();
-            let htmlOriginal = parsed.html || parsed.textAsHtml || "";
 
-            const esCorreoDeCambio = subject.includes("cambio") || subject.includes("cuenta") || subject.includes("contraseña") || subject.includes("password") || subject.includes("sesión") || contenido.includes("cambiar la información") || contenido.includes("restablecer tu contraseña");
-            const esAccesoUtil = subject.includes("código") || subject.includes("codigo") || subject.includes("temporal") || subject.includes("hogar") || subject.includes("viaje");
+            const esUtil = subject.includes("código") || subject.includes("codigo") || subject.includes("temporal") || subject.includes("hogar");
+            const esCambio = subject.includes("contraseña") || subject.includes("password") || contenido.includes("restablecer");
 
-            if (esAccesoUtil && !esCorreoDeCambio) {
+            if (esUtil && !esCambio) {
                 const correoDestino = (msg.envelope.to[0].address || "").toLowerCase().trim();
+                const linkMatch = html.match(/href="([^"]*update-home[^"]*)"/) || 
+                                 html.match(/href="([^"]*confirm-account[^"]*)"/);
                 
-                const linkMatch = htmlOriginal.match(/href="([^"]*update-home[^"]*)"/) || 
-                                  htmlOriginal.match(/href="([^"]*confirm-account[^"]*)"/) ||
-                                  htmlOriginal.match(/href="([^"]*netflix.com\/browse[^"]*)"/);
-                const elLink = linkMatch ? linkMatch[1] : null;
+                if (linkMatch) {
+                    const elLink = linkMatch[1];
+                    const cliente = clientes.find(c => (c[4] || "").toLowerCase().trim() === correoDestino);
 
-                if (elLink) {
-                    console.log(`Link encontrado para: ${correoDestino}`);
-                    let clientesMatch = todosLosClientes.filter(f => (f[4] || "").toLowerCase().trim() === correoDestino);
-                    
-                    if (clientesMatch.length > 0) {
-                        for (let c of clientesMatch) {
-                            const msj = `🏠 *ACTUALIZACIÓN NETFLIX*\n\nHola *${c[1]}*, pulsa el botón para activar tu TV:\n\n${elLink}`;
-                            await enviarWA(c[2], msj);
-                        }
+                    if (cliente) {
+                        // 1. Notificar al Cliente
+                        await enviarWA(cliente[2], `🏠 *ACTUALIZACIÓN NETFLIX*\n\nHola *${cliente[1]}*, activa tu TV aquí:\n\n${elLink}`);
+                        
+                        // 2. Notificar al Admin (Éxito)
+                        await enviarWA(ADMIN_PHONE, `✅ *ENVIADO AUTOMÁTICO*\n\n👤 Cliente: ${cliente[1]}\n📧 Cuenta: ${correoDestino}\n📱 Tel: ${cliente[2]}`);
                     } else {
-                        const msjAdmin = `⚠️ *CUENTA NO ENCONTRADA*\n\nCorreo: ${correoDestino}\nLink: ${elLink}`;
-                        await enviarWA(ADMIN_PHONE, msjAdmin);
+                        // 3. Notificar al Admin (Error: Cliente no está en Excel)
+                        await enviarWA(ADMIN_PHONE, `⚠️ *CORREO SIN DUEÑO*\n\nLlegó un link para: ${correoDestino}\nPero no está en tu Excel.\n\n🔗 Link: ${elLink}`);
                     }
                 }
-
-                const fechaRD = new Date(msg.envelope.date).toLocaleString('es-DO', {
-                    timeZone: 'America/Santo_Domingo', hour: '2-digit', minute: '2-digit', hour12: true
-                });
-
-                emailsParaMostrar.push({ subject: msg.envelope.subject, date: fechaRD, to: correoDestino, html: htmlOriginal });
             }
+            // Marcar como leído para no repetir
+            await client.messageFlagsAdd(seq, ['\\Seen']);
         }
         await client.logout();
-        res.json({ emails: emailsParaMostrar });
-    } catch (error) {
-        console.log("Error en el proceso:", error.message);
+    } catch (e) {
+        console.log("❌ Error:", e.message);
+        await enviarWA(ADMIN_PHONE, `🚨 *ERROR CRÍTICO*: ${e.message}`);
         if (client) await client.logout().catch(() => {});
-        res.status(500).json({ error: "Error" });
     }
-});
+}
 
-app.listen(PORT, '0.0.0.0', () => { console.log("🚀 Monitor de Diagnóstico activo"); });
+// Mensaje de inicio
+console.log("🚀 Bot de Netflix Iniciado");
+enviarWA(ADMIN_PHONE, "🚀 *SISTEMA ACTIVO*\nEl bot de Netflix está encendido y revisando correos cada minuto.");
+
+// Ejecutar
+procesarCorreos();
+setInterval(procesarCorreos, RECHECK_TIME);
