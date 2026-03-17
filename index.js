@@ -11,6 +11,7 @@ const RECHECK_TIME = 1 * 60 * 1000;
 const correosProcesados = new Set();
 let botIniciado = false;
 
+// Limpia el perfil para que coincida con tu Columna G del Excel
 function limpiarPerfil(texto) {
     if (!texto) return "";
     let soloNumeros = texto.replace(/\D/g, "");
@@ -52,7 +53,7 @@ async function procesarCorreos() {
         const todosLosClientes = spreadsheet.data.values || [];
 
         if (!botIniciado) {
-            await enviarWA(ADMIN_PHONE, `🚀 *BOT TRIPLE CLICK ACTIVADO*\nProcesando confirmaciones completas de Netflix.`);
+            await enviarWA(ADMIN_PHONE, `🚀 *BOT MAESTRO ACTIVO*\nValidando 86 clientes con Doble/Triple Clic Automático.`);
             botIniciado = true;
         }
 
@@ -63,62 +64,57 @@ async function procesarCorreos() {
 
             let msg = await client.fetchOne(seq, { source: true, envelope: true });
             let parsed = await simpleParser(msg.source);
-            let htmlOriginal = parsed.html || parsed.textAsHtml || "";
+            let htmlOriginal = parsed.html || "";
             let text = (parsed.text || "").replace(/\s+/g, ' '); 
             let correoCuenta = (msg.envelope.to[0].address || "").toLowerCase().trim();
 
-            const linkMatch = htmlOriginal.match(/href="([^"]*update-home[^"]*)"/) || 
+            // 1. Extraer Link (Buscador agresivo de botones)
+            const linkMatch = htmlOriginal.match(/href="([^"]*pin-code[^"]*)"/) || 
+                              htmlOriginal.match(/href="([^"]*update-home[^"]*)"/) || 
                               htmlOriginal.match(/href="([^"]*confirm-account[^"]*)"/);
-            
             let elLink = linkMatch ? linkMatch[1].replace(/&amp;/g, "&") : null;
-            const matchSolicitud = text.match(/Solicitud de\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]+)/i);
-            const matchHola = text.match(/Hola,\s*([^:]+):/i);
-            let perfilNombre = matchSolicitud ? matchSolicitud[1].trim() : (matchHola ? matchHola[1].trim() : null);
 
-            if (elLink && perfilNombre) {
-                // 🛑 INICIO DE CADENA DE CLICS
+            // 2. Extraer Perfil (Solicitud de... o Hola, ...)
+            const matchPerfil = text.match(/Solicitud de ([^ ]+)/i) || text.match(/Hola, ([^:]+):/i);
+            let perfilNombre = matchPerfil ? matchPerfil[1].trim() : "DESCONOCIDO";
+
+            if (elLink && perfilNombre !== "DESCONOCIDO") {
+                let codigoFinal = null;
                 try {
-                    // Click 1: Abrir desde el correo
-                    let res = await fetch(elLink, { 
-                        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
-                        redirect: 'follow' 
-                    });
-                    let htmlPaso2 = await res.text();
+                    // --- PASO DE NAVEGACIÓN (LOS CLICKS) ---
+                    // Clic 1: Entrar al link del correo
+                    let res1 = await fetch(elLink, { headers: { 'User-Agent': 'Mozilla/5.0' }, redirect: 'follow' });
+                    let htmlPaso2 = await res1.text();
 
-                    // Click 2: Buscar botón "Sí, la envié yo" o similar
+                    // Clic 2: Buscar botón de confirmación o "Enviar código"
                     const confirmMatch1 = htmlPaso2.match(/href="([^"]*update-home-confirmed[^"]*)"/) || 
+                                          htmlPaso2.match(/href="([^"]*send-code[^"]*)"/) ||
                                           htmlPaso2.match(/href="([^"]*verify-device[^"]*)"/);
                     
                     if (confirmMatch1) {
                         let res2 = await fetch(confirmMatch1[1], { headers: { 'User-Agent': 'Mozilla/5.0' }, redirect: 'follow' });
                         let htmlPaso3 = await res2.text();
-
-                        // Click 3: Confirmación Final (si existe una tercera pantalla)
-                        const confirmMatch2 = htmlPaso3.match(/href="([^"]*confirmed[^"]*)"/) || 
-                                              htmlPaso3.match(/href="([^"]*update-hogar[^"]*)"/);
-                        if (confirmMatch2) {
-                            await fetch(confirmMatch2[1], { headers: { 'User-Agent': 'Mozilla/5.0' } });
-                        }
+                        
+                        // Intentar extraer el código de 4 dígitos de la página final si existe
+                        const pinMatch = htmlPaso3.match(/>(\d{4})</) || htmlPaso3.match(/\b\d{4}\b/);
+                        codigoFinal = pinMatch ? pinMatch[1] : null;
                     }
-                } catch (err) { console.log(`Error en cadena de clics: ${err.message}`); }
+                } catch (err) { console.log("Error en flujo de clics:", err.message); }
 
-                const perfilBusqueda = limpiarPerfil(perfilNombre);
+                // 3. Buscar cliente y enviar resultado
                 const cliente = todosLosClientes.find(fila => {
                     let correoFila = (fila[4] || "").toLowerCase().trim();
                     let perfilFila = limpiarPerfil(fila[6]);
-                    return correoFila === correoCuenta && perfilFila === perfilBusqueda;
+                    return correoFila === correoCuenta && perfilFila === limpiarPerfil(perfilNombre);
                 });
 
                 if (cliente) {
-                    const codigoMatch = text.match(/\b\d{4}\b/);
-                    let elCodigo = codigoMatch ? codigoMatch[0] : null;
-
-                    if (elCodigo) {
-                        await enviarWA(cliente[2], `🔑 *CÓDIGO NETFLIX*\n\nHola *${cliente[1]}*, tu código para el perfil *${perfilNombre}* es: *${elCodigo}*`);
+                    if (codigoFinal) {
+                        await enviarWA(cliente[2], `🔑 *TU CÓDIGO NETFLIX*\n\nHola *${cliente[1]}*, tu código de acceso es: *${codigoFinal}*`);
                     } else {
-                        await enviarWA(cliente[2], `✅ *NETFLIX LISTO*\n\nHola *${cliente[1]}*, ya confirmamos tu solicitud para el perfil *${perfilNombre}*.\n\nYa puedes disfrutar de tus películas. 🍿`);
+                        await enviarWA(cliente[2], `✅ *ACCESO AUTORIZADO*\n\nHola *${cliente[1]}*, ya validamos tu solicitud para el perfil *${perfilNombre}*.\nYa puedes entrar a disfrutar. 🍿`);
                     }
-                    await enviarWA(ADMIN_PHONE, `✨ *CONFIRMADO*: ${cliente[1]} (${perfilNombre}) activado con éxito.`);
+                    await enviarWA(ADMIN_PHONE, `✨ *ÉXITO*: ${cliente[1]} (${perfilNombre}) procesado.`);
                 }
             }
             correosProcesados.add(seq);
