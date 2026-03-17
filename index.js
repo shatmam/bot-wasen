@@ -58,40 +58,36 @@ async function procesarCorreos() {
             
             let htmlRaw = parsed.html || "";
 
-            // 🔥 FIX DEFINITIVO DEL LINK
+            // 🔥 intento de extraer link (secundario)
             let htmlLimpio = htmlRaw
-                .replace(/=\r?\n/g, "")   // reconstruye líneas cortadas
+                .replace(/=\r?\n/g, "")
                 .replace(/&amp;/g, "&");
 
-            // extraer TODOS los href
             const hrefs = [...htmlLimpio.matchAll(/href="([^"]+)"/gi)].map(m => m[1]);
 
-            // filtrar SOLO el correcto
             const linkBueno = hrefs.find(l => 
                 l.includes("update-primary-location") || 
                 l.includes("update-home")
             );
 
-            let elLink = null;
+            let elLink = linkBueno
+                ? linkBueno.replace(/\s/g, "").trim()
+                : null;
 
-            if (linkBueno) {
-                elLink = linkBueno
-                    .replace(/=\r?\n/g, "")
-                    .replace(/\s/g, "")
-                    .trim();
-            }
+            // 🔥 CONTENIDO PRINCIPAL (LO IMPORTANTE)
+            let contenidoCorreo = (parsed.text || "")
+                .replace(/\s+\n/g, "\n")
+                .trim();
 
-            // 🧪 debug
-            console.log("🔗 LINK FINAL:", elLink);
-
-            let text = (parsed.text || "").replace(/\s+/g, ' '); 
+            let text = contenidoCorreo.replace(/\s+/g, ' '); 
             let correoCuenta = (meta.envelope.to[0].address || "").toLowerCase().trim();
 
             const matchSolicitud = text.match(/Solicitud de\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ ]+)/i);
             const matchHola = text.match(/Hola,\s*([^:]+):/i);
             let perfilDelCorreo = matchSolicitud ? matchSolicitud[1].trim() : (matchHola ? matchHola[1].trim() : "DESCONOCIDO");
 
-            if (elLink && perfilDelCorreo !== "DESCONOCIDO") {
+            if ((contenidoCorreo || elLink) && perfilDelCorreo !== "DESCONOCIDO") {
+
                 const perfilBusqueda = perfilDelCorreo.toLowerCase().trim();
                 const llaveSpam = `${correoCuenta}-${perfilBusqueda}`;
                 const ahora = Date.now();
@@ -108,17 +104,32 @@ async function procesarCorreos() {
 
                 if (coincidencias.length > 0) {
                     for (let cliente of coincidencias) {
-                        const msjCliente = `🏠 *ACTUALIZACIÓN NETFLIX*\n\nHola *${cliente[1]}*, pulsa el link para activar tu TV:\n\n${elLink}`;
+
+                        const msjCliente = `🏠 *ACTUALIZACIÓN NETFLIX*
+
+Hola *${cliente[1]}*,
+
+Sigue las instrucciones del mensaje:
+
+${contenidoCorreo}
+
+${elLink ? "\n🔗 Link directo:\n" + elLink : ""}`;
+
                         await enviarWA(cliente[2], msjCliente);
                     }
-                    console.log(`✅ Enviado link largo a ${perfilDelCorreo}`);
+
+                    console.log(`✅ Enviado correo completo a ${perfilDelCorreo}`);
                     enviosRecientes.set(llaveSpam, ahora); 
                 }
+
                 correosProcesados.add(uid);
             }
         }
+
         await client.logout();
+
     } catch (e) {
+        console.log("❌ ERROR:", e.message);
         if (client) await client.logout().catch(() => {});
     }
 }
