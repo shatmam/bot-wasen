@@ -46,35 +46,39 @@ async function procesarCorreos() {
         const clientes = spreadsheet.data.values || [];
 
         if (!botIniciado) {
-            await enviarWA(ADMIN_PHONE, `📡 *AUDITORÍA ACTIVA*\nClientes: ${clientes.length}\nRevisando últimos 3 de Netflix...`);
+            await enviarWA(ADMIN_PHONE, `🚀 *SISTEMA REPARADO*\nEscaneando correos...`);
             botIniciado = true;
         }
 
         let list = await client.search({ from: "netflix" });
-        let ultimos = list.slice(-3); 
+        let ultimos = list.slice(-3).reverse(); 
 
         for (let seq of ultimos) {
             if (correosProcesados.has(seq)) continue;
 
             let msg = await client.fetchOne(seq, { source: true, envelope: true });
             let parsed = await simpleParser(msg.source);
-            let text = (parsed.text || "").replace(/\s+/g, ' '); 
             let html = parsed.html || "";
+            // Limpieza de texto para detectar perfil mejor
+            let text = (parsed.text || "").replace(/\r?\n|\r/g, " "); 
             let correoCuenta = (msg.envelope.to[0].address || "").toLowerCase().trim();
 
-            // 🔍 EXTRACCIÓN AGRESIVA DE PERFIL
-            const matchSolicitud = text.match(/Solicitud de\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]+)/i);
+            // 1. MEJORADO: Captura de Perfil (Busca "Solicitud de" o "Hola, [nombre]:")
+            let perfilDelCorreo = "DESCONOCIDO";
+            const matchSolicitud = text.match(/Solicitud de\s+([^\s,]+)/i);
             const matchHola = text.match(/Hola,\s*([^:]+):/i);
-            let perfilDelCorreo = matchSolicitud ? matchSolicitud[1].trim() : (matchHola ? matchHola[1].trim() : "DESCONOCIDO");
+            
+            if (matchSolicitud) perfilDelCorreo = matchSolicitud[1].trim();
+            else if (matchHola) perfilDelCorreo = matchHola[1].trim();
 
-            // 🔗 EXTRACCIÓN DE LINK
-            const regexLink = /https:\/\/www\.netflix\.com\/[^\s"<>]+(?:confirm-account|update-home)[^\s"<>]+/gi;
+            // 2. MEJORADO: Captura de Link (Rastreo de botón de Netflix)
+            // Esta regex busca URLs que contengan 'update-home' o 'confirm-account' ignorando caracteres de escape
+            const regexLink = /https?:\/\/(?:www\.)?netflix\.com\/[^\s"<>]+(?:update-home|confirm-account|nm_hp)[^\s"<>]+/gi;
             const links = html.match(regexLink) || text.match(regexLink);
-            const elLink = links ? links[0] : null;
+            const elLink = links ? links[0].replace(/&amp;/g, '&') : null;
 
-            // 📢 NOTIFICACIÓN OBLIGATORIA AL ADMIN
-            let reporte = `📩 *CORREO DETECTADO*\n📧 Cuenta: ${correoCuenta}\n👤 Perfil: "${perfilDelCorreo}"\n🔗 Link: ${elLink ? "✅ OK" : "❌ NO ENCONTRADO"}`;
-            await enviarWA(ADMIN_PHONE, reporte);
+            // Reporte al Admin
+            await enviarWA(ADMIN_PHONE, `📩 *ANALIZANDO*\n📧 Cuenta: ${correoCuenta}\n👤 Perfil: "${perfilDelCorreo}"\n🔗 Link: ${elLink ? "✅ ENCONTRADO" : "❌ NO ENCONTRADO"}`);
 
             if (elLink && perfilDelCorreo !== "DESCONOCIDO") {
                 const cliente = clientes.find(c => 
@@ -83,10 +87,10 @@ async function procesarCorreos() {
                 );
 
                 if (cliente) {
-                    await enviarWA(cliente[2], `🏠 *ACTIVA TU TV*\n\nHola *${cliente[1]}*, dale clic aquí:\n${elLink}`);
-                    await enviarWA(ADMIN_PHONE, `✅ *ENVIADO A*: ${cliente[1]}`);
+                    await enviarWA(cliente[2], `🏠 *ACTIVA TU TV*\n\nHola *${cliente[1]}*, dale clic aquí para actualizar tu Hogar:\n${elLink}`);
+                    await enviarWA(ADMIN_PHONE, `✅ *ENVIADO*: ${cliente[1]} (${perfilDelCorreo})`);
                 } else {
-                    await enviarWA(ADMIN_PHONE, `⚠️ *SIN DUEÑO*: Revisa que en el Excel diga "${perfilDelCorreo}" en la columna G para ${correoCuenta}`);
+                    await enviarWA(ADMIN_PHONE, `⚠️ *SIN REGISTRO*: No encontré el perfil "${perfilDelCorreo}" para la cuenta ${correoCuenta} en tu Excel.`);
                 }
             }
             correosProcesados.add(seq);
