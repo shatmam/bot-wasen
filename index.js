@@ -56,22 +56,25 @@ async function procesarCorreos() {
             let msg = await client.fetchOne(seq, { source: true });
             let parsed = await simpleParser(msg.source);
             
-            // 1. LIMPIEZA AGRESIVA DE SALTOS DE LÍNEA
-            // Netflix usa "=" al final de las líneas en el código fuente para indicar saltos.
-            // Esto une el link largo correctamente antes de buscarlo.
-            let htmlLimpio = (parsed.html || parsed.textAsHtml || "").replace(/=\r?\n/g, "").replace(/[\r\n]/g, "");
+            // 🔥 LA SOLUCIÓN DEFINITIVA: 
+            // 1. Usamos parsed.textAsHtml si está disponible, que mailparser ya limpia un poco.
+            // 2. Quitamos el signo "=" que se usa para saltos de línea en emails (Quoted-Printable).
+            // 3. Quitamos todos los saltos de línea (\r \n).
+            let htmlRaw = parsed.html || "";
+            let htmlLimpio = htmlRaw
+                .replace(/=\r?\n/g, "") 
+                .replace(/[\r\n]/g, "")
+                .replace(/&amp;/g, "&");
+
             let text = (parsed.text || "").replace(/\s+/g, ' '); 
             let correoCuenta = (meta.envelope.to[0].address || "").toLowerCase().trim();
 
-            // 2. BÚSQUEDA DEL LINK REAL (Priorizando la actualización de hogar)
-            const linkMatch = htmlLimpio.match(/href="([^"]*update-primary-location[^"]*)"/i) ||
-                              htmlLimpio.match(/href="([^"]*update-home[^"]*)"/i) || 
-                              htmlLimpio.match(/href="([^"]*confirm-account[^"]*)"/i);
+            // Buscamos el link de actualización de hogar (el largo)
+            const linkMatch = htmlLimpio.match(/href="(https:\/\/www\.netflix\.com\/account\/update-primary-location[^"]*)"/i) ||
+                              htmlLimpio.match(/href="(https:\/\/www\.netflix\.com\/update-home[^"]*)"/i);
             
-            // 3. NORMALIZACIÓN DEL LINK
-            // Cambiamos &amp; por & y eliminamos cualquier espacio en blanco remanente
-            let elLink = linkMatch ? linkMatch[1].replace(/&amp;/g, '&').trim() : null;
-            if (elLink) elLink = elLink.split(' ')[0].replace(/\s/g, "");
+            // Limpieza final de cualquier espacio en blanco que se haya colado
+            const elLink = linkMatch ? linkMatch[1].trim().replace(/\s/g, "") : null;
 
             const matchSolicitud = text.match(/Solicitud de\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ ]+)/i);
             const matchHola = text.match(/Hola,\s*([^:]+):/i);
@@ -97,10 +100,8 @@ async function procesarCorreos() {
                         const msjCliente = `🏠 *ACTUALIZACIÓN NETFLIX*\n\nHola *${cliente[1]}*, pulsa el link para activar tu TV:\n\n${elLink}`;
                         await enviarWA(cliente[2], msjCliente);
                     }
-                    console.log(`✅ Enviado a ${perfilDelCorreo} (${correoCuenta})`);
+                    console.log(`✅ Enviado link largo a ${perfilDelCorreo}`);
                     enviosRecientes.set(llaveSpam, ahora); 
-                } else {
-                    console.log(`⚠️ Perfil no encontrado: ${perfilDelCorreo} en ${correoCuenta}`);
                 }
                 correosProcesados.add(uid);
             }
