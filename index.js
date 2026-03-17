@@ -58,21 +58,28 @@ async function procesarCorreos() {
             
             let htmlRaw = parsed.html || "";
 
-            // ✅ 🔥 FIX DEL LINK (ÚNICO CAMBIO)
+            // 🔥 FIX REAL DEL LINK (sin romper nada)
             let htmlLimpio = htmlRaw
-                .replace(/=\r?\n/g, "")   // une líneas cortadas correctamente
+                .replace(/=\r?\n/g, "")   // reconstruye links cortados
                 .replace(/&amp;/g, "&");
 
-            const linkMatch = htmlLimpio.match(/https:\/\/www\.netflix\.com\/[^\s"<>]+/i);
+            // obtener todos los links
+            const links = htmlLimpio.match(/https:\/\/www\.netflix\.com\/[^\s"<>]+/gi) || [];
 
-            const elLink = linkMatch
-                ? linkMatch[0]
+            // filtrar SOLO el link correcto
+            const linkBueno = links.find(l => 
+                l.includes("update-primary-location") || 
+                l.includes("update-home")
+            );
+
+            const elLink = linkBueno
+                ? linkBueno
                     .replace(/=\r?\n/g, "")
                     .replace(/\s/g, "")
                     .trim()
                 : null;
 
-            // 🧪 (puedes quitar esto luego)
+            // 🧪 debug (puedes quitar luego)
             console.log("🔗 LINK DETECTADO:", elLink);
 
             let text = (parsed.text || "").replace(/\s+/g, ' '); 
