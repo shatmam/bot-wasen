@@ -4,6 +4,11 @@ const { simpleParser } = require('mailparser');
 const { google } = require("googleapis");
 const fetch = require("node-fetch");
 
+// 🔥 NUEVO
+const PDFDocument = require("pdfkit");
+const fs = require("fs");
+const FormData = require("form-data");
+
 const ADMIN_PHONE = process.env.ADMIN_PHONE; 
 const WA_TOKEN = process.env.WA_TOKEN;
 const RECHECK_TIME = 1 * 60 * 1000; 
@@ -11,23 +16,63 @@ const RECHECK_TIME = 1 * 60 * 1000;
 const correosProcesados = new Set();
 const enviosRecientes = new Map();
 
-async function enviarWA(tel, msj) {
+// 🔥 CREAR PDF
+async function crearPDF(contenido, nombreArchivo) {
+    return new Promise((resolve, reject) => {
+        const doc = new PDFDocument({ margin: 40 });
+        const stream = fs.createWriteStream(nombreArchivo);
+
+        doc.pipe(stream);
+
+        // Título
+        doc.fontSize(18).text("📩 NETFLIX - CORREO RECIBIDO", { align: "center" });
+        doc.moveDown();
+
+        // Contenido
+        doc.fontSize(12).text(contenido, {
+            align: "left"
+        });
+
+        doc.end();
+
+        stream.on("finish", () => resolve(nombreArchivo));
+        stream.on("error", reject);
+    });
+}
+
+// 🔥 ENVIAR PDF POR WHATSAPP
+async function enviarPDF(tel, archivo) {
     try {
         let numero = tel.toString().replace(/[^0-9]/g, "");
         if (!numero.startsWith("1") && numero.length === 10) numero = "1" + numero;
-        await fetch("https://www.wasenderapi.com/api/send-message", {
+
+        const form = new FormData();
+        form.append("to", "+" + numero);
+        form.append("file", fs.createReadStream(archivo));
+        form.append("caption", "📄 Correo de Netflix");
+
+        await fetch("https://www.wasenderapi.com/api/send-file", {
             method: "POST",
-            headers: { "Authorization": `Bearer ${WA_TOKEN}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ to: "+" + numero, text: msj })
+            headers: {
+                "Authorization": `Bearer ${WA_TOKEN}`,
+                ...form.getHeaders()
+            },
+            body: form
         });
-    } catch (e) { console.log("❌ Error WA:", e.message); }
+
+    } catch (e) {
+        console.log("❌ Error enviando PDF:", e.message);
+    }
 }
 
 async function procesarCorreos() {
     const client = new ImapFlow({
-        host: "imap.gmail.com", port: 993, secure: true,
+        host: "imap.gmail.com",
+        port: 993,
+        secure: true,
         auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
-        logger: false, tls: { rejectUnauthorized: false }
+        logger: false,
+        tls: { rejectUnauthorized: false }
     });
 
     try {
@@ -38,16 +83,20 @@ async function procesarCorreos() {
             credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
             scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"]
         });
+
         const sheets = google.sheets({ version: "v4", auth });
+
         const spreadsheet = await sheets.spreadsheets.values.get({ 
             spreadsheetId: process.env.SPREADSHEET_ID, 
             range: "Clientes!A2:K1000" 
         });
+
         const clientes = spreadsheet.data.values || [];
 
         let list = await client.search({ from: "netflix" });
-        
+
         for (let seq of list.slice(-10).reverse()) {
+
             let meta = await client.fetchOne(seq, { envelope: true });
             let uid = meta.envelope.messageId;
 
@@ -55,38 +104,18 @@ async function procesarCorreos() {
 
             let msg = await client.fetchOne(seq, { source: true });
             let parsed = await simpleParser(msg.source);
-            
-            let htmlRaw = parsed.html || "";
 
-            // 🔥 intento de extraer link (secundario)
-            let htmlLimpio = htmlRaw
-                .replace(/=\r?\n/g, "")
-                .replace(/&amp;/g, "&");
-
-            const hrefs = [...htmlLimpio.matchAll(/href="([^"]+)"/gi)].map(m => m[1]);
-
-            const linkBueno = hrefs.find(l => 
-                l.includes("update-primary-location") || 
-                l.includes("update-home")
-            );
-
-            let elLink = linkBueno
-                ? linkBueno.replace(/\s/g, "").trim()
-                : null;
-
-            // 🔥 CONTENIDO PRINCIPAL (LO IMPORTANTE)
-            let contenidoCorreo = (parsed.text || "")
-                .replace(/\s+\n/g, "\n")
-                .trim();
-
-            let text = contenidoCorreo.replace(/\s+/g, ' '); 
+            let text = (parsed.text || "").replace(/\s+/g, ' ');
             let correoCuenta = (meta.envelope.to[0].address || "").toLowerCase().trim();
 
             const matchSolicitud = text.match(/Solicitud de\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ ]+)/i);
             const matchHola = text.match(/Hola,\s*([^:]+):/i);
-            let perfilDelCorreo = matchSolicitud ? matchSolicitud[1].trim() : (matchHola ? matchHola[1].trim() : "DESCONOCIDO");
 
-            if ((contenidoCorreo || elLink) && perfilDelCorreo !== "DESCONOCIDO") {
+            let perfilDelCorreo = matchSolicitud 
+                ? matchSolicitud[1].trim() 
+                : (matchHola ? matchHola[1].trim() : "DESCONOCIDO");
+
+            if (parsed.text && perfilDelCorreo !== "DESCONOCIDO") {
 
                 const perfilBusqueda = perfilDelCorreo.toLowerCase().trim();
                 const llaveSpam = `${correoCuenta}-${perfilBusqueda}`;
@@ -103,23 +132,23 @@ async function procesarCorreos() {
                 );
 
                 if (coincidencias.length > 0) {
+
                     for (let cliente of coincidencias) {
 
-                        const msjCliente = `🏠 *ACTUALIZACIÓN NETFLIX*
+                        const contenidoCorreo = parsed.text || "No se pudo leer el correo";
 
-Hola *${cliente[1]}*,
+                        const nombreArchivo = `correo-${Date.now()}.pdf`;
 
-Sigue las instrucciones del mensaje:
+                        await crearPDF(contenidoCorreo, nombreArchivo);
 
-${contenidoCorreo}
+                        await enviarPDF(cliente[2], nombreArchivo);
 
-${elLink ? "\n🔗 Link directo:\n" + elLink : ""}`;
-
-                        await enviarWA(cliente[2], msjCliente);
+                        // eliminar archivo después de enviar
+                        fs.unlinkSync(nombreArchivo);
                     }
 
-                    console.log(`✅ Enviado correo completo a ${perfilDelCorreo}`);
-                    enviosRecientes.set(llaveSpam, ahora); 
+                    console.log(`✅ PDF enviado a ${perfilDelCorreo}`);
+                    enviosRecientes.set(llaveSpam, ahora);
                 }
 
                 correosProcesados.add(uid);
