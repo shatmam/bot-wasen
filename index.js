@@ -11,11 +11,10 @@ const RECHECK_TIME = 1 * 60 * 1000;
 const correosProcesados = new Set();
 let botIniciado = false;
 
-// Limpia el perfil para que coincida con tu Columna G del Excel
+// Limpieza para comparar perfil (Columna G)
 function limpiarPerfil(texto) {
     if (!texto) return "";
-    let soloNumeros = texto.replace(/\D/g, "");
-    return soloNumeros !== "" ? soloNumeros : texto.toLowerCase().trim();
+    return texto.replace(/Solicitud de/i, "").trim().toLowerCase();
 }
 
 async function enviarWA(tel, msj) {
@@ -53,7 +52,7 @@ async function procesarCorreos() {
         const todosLosClientes = spreadsheet.data.values || [];
 
         if (!botIniciado) {
-            await enviarWA(ADMIN_PHONE, `🚀 *BOT MAESTRO ACTIVO*\nValidando 86 clientes con Doble/Triple Clic Automático.`);
+            await enviarWA(ADMIN_PHONE, `✅ *BOT DE ENVÍO DIRECTO ACTIVO*\nEnviando links a clientes según su perfil.`);
             botIniciado = true;
         }
 
@@ -68,53 +67,36 @@ async function procesarCorreos() {
             let text = (parsed.text || "").replace(/\s+/g, ' '); 
             let correoCuenta = (msg.envelope.to[0].address || "").toLowerCase().trim();
 
-            // 1. Extraer Link (Buscador agresivo de botones)
+            // 1. Extraer Link
             const linkMatch = htmlOriginal.match(/href="([^"]*pin-code[^"]*)"/) || 
                               htmlOriginal.match(/href="([^"]*update-home[^"]*)"/) || 
                               htmlOriginal.match(/href="([^"]*confirm-account[^"]*)"/);
+            
             let elLink = linkMatch ? linkMatch[1].replace(/&amp;/g, "&") : null;
 
-            // 2. Extraer Perfil (Solicitud de... o Hola, ...)
+            // 2. Extraer Perfil
             const matchPerfil = text.match(/Solicitud de ([^ ]+)/i) || text.match(/Hola, ([^:]+):/i);
             let perfilNombre = matchPerfil ? matchPerfil[1].trim() : "DESCONOCIDO";
 
             if (elLink && perfilNombre !== "DESCONOCIDO") {
-                let codigoFinal = null;
-                try {
-                    // --- PASO DE NAVEGACIÓN (LOS CLICKS) ---
-                    // Clic 1: Entrar al link del correo
-                    let res1 = await fetch(elLink, { headers: { 'User-Agent': 'Mozilla/5.0' }, redirect: 'follow' });
-                    let htmlPaso2 = await res1.text();
+                const perfilBusqueda = limpiarPerfil(perfilNombre);
 
-                    // Clic 2: Buscar botón de confirmación o "Enviar código"
-                    const confirmMatch1 = htmlPaso2.match(/href="([^"]*update-home-confirmed[^"]*)"/) || 
-                                          htmlPaso2.match(/href="([^"]*send-code[^"]*)"/) ||
-                                          htmlPaso2.match(/href="([^"]*verify-device[^"]*)"/);
-                    
-                    if (confirmMatch1) {
-                        let res2 = await fetch(confirmMatch1[1], { headers: { 'User-Agent': 'Mozilla/5.0' }, redirect: 'follow' });
-                        let htmlPaso3 = await res2.text();
-                        
-                        // Intentar extraer el código de 4 dígitos de la página final si existe
-                        const pinMatch = htmlPaso3.match(/>(\d{4})</) || htmlPaso3.match(/\b\d{4}\b/);
-                        codigoFinal = pinMatch ? pinMatch[1] : null;
-                    }
-                } catch (err) { console.log("Error en flujo de clics:", err.message); }
-
-                // 3. Buscar cliente y enviar resultado
+                // 3. Buscar en Excel (Mismo Correo + Mismo Perfil)
                 const cliente = todosLosClientes.find(fila => {
                     let correoFila = (fila[4] || "").toLowerCase().trim();
-                    let perfilFila = limpiarPerfil(fila[6]);
-                    return correoFila === correoCuenta && perfilFila === limpiarPerfil(perfilNombre);
+                    let perfilFila = limpiarPerfil(fila[6] || "");
+                    return correoFila === correoCuenta && perfilFila === perfilBusqueda;
                 });
 
                 if (cliente) {
-                    if (codigoFinal) {
-                        await enviarWA(cliente[2], `🔑 *TU CÓDIGO NETFLIX*\n\nHola *${cliente[1]}*, tu código de acceso es: *${codigoFinal}*`);
-                    } else {
-                        await enviarWA(cliente[2], `✅ *ACCESO AUTORIZADO*\n\nHola *${cliente[1]}*, ya validamos tu solicitud para el perfil *${perfilNombre}*.\nYa puedes entrar a disfrutar. 🍿`);
-                    }
-                    await enviarWA(ADMIN_PHONE, `✨ *ÉXITO*: ${cliente[1]} (${perfilNombre}) procesado.`);
+                    // 4. Enviar link al cliente
+                    const mensaje = `🏠 *SOLICITUD NETFLIX*\n\nHola *${cliente[1]}*, detectamos tu solicitud en el perfil *${perfilNombre}*.\n\nPulsa el botón de abajo para activar tu acceso:\n${elLink}`;
+                    await enviarWA(cliente[2], mensaje);
+                    
+                    // Reporte al Admin
+                    await enviarWA(ADMIN_PHONE, `✅ *LINK ENVIADO*: ${cliente[1]} (${perfilNombre}) recibio su link de activación.`);
+                } else {
+                    await enviarWA(ADMIN_PHONE, `⚠️ *NO ENCONTRADO*: Se recibió solicitud de "${perfilNombre}" en ${correoCuenta}, pero no está en el Excel.`);
                 }
             }
             correosProcesados.add(seq);
