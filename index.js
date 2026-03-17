@@ -4,11 +4,6 @@ const { simpleParser } = require('mailparser');
 const { google } = require("googleapis");
 const fetch = require("node-fetch");
 
-// 🔥 NUEVO
-const PDFDocument = require("pdfkit");
-const fs = require("fs");
-const FormData = require("form-data");
-
 const ADMIN_PHONE = process.env.ADMIN_PHONE; 
 const WA_TOKEN = process.env.WA_TOKEN;
 const RECHECK_TIME = 1 * 60 * 1000; 
@@ -16,57 +11,39 @@ const RECHECK_TIME = 1 * 60 * 1000;
 const correosProcesados = new Set();
 const enviosRecientes = new Map();
 
-// 🔥 CREAR PDF
-async function crearPDF(contenido, nombreArchivo) {
-    return new Promise((resolve, reject) => {
-        const doc = new PDFDocument();
-        const stream = fs.createWriteStream(nombreArchivo);
-
-        doc.pipe(stream);
-
-        doc.fontSize(16).text("📩 NETFLIX", { align: "center" });
-        doc.moveDown();
-        doc.fontSize(12).text(contenido, {
-            align: "left"
-        });
-
-        doc.end();
-
-        stream.on("finish", () => resolve(nombreArchivo));
-        stream.on("error", reject);
-    });
-}
-
-// 🔥 ENVIAR PDF
-async function enviarPDF(tel, archivo) {
+async function enviarWA(tel, msj) {
     try {
         let numero = tel.toString().replace(/[^0-9]/g, "");
         if (!numero.startsWith("1") && numero.length === 10) numero = "1" + numero;
 
-        const form = new FormData();
-        form.append("to", "+" + numero);
-        form.append("file", fs.createReadStream(archivo));
-        form.append("caption", "📩 Correo de Netflix");
-
-        await fetch("https://www.wasenderapi.com/api/send-file", {
+        await fetch("https://www.wasenderapi.com/api/send-message", {
             method: "POST",
             headers: {
                 "Authorization": `Bearer ${WA_TOKEN}`,
-                ...form.getHeaders()
+                "Content-Type": "application/json"
             },
-            body: form
+            body: JSON.stringify({
+                to: "+" + numero,
+                text: msj
+            })
         });
 
     } catch (e) {
-        console.log("❌ Error enviando PDF:", e.message);
+        console.log("❌ Error WA:", e.message);
     }
 }
 
 async function procesarCorreos() {
     const client = new ImapFlow({
-        host: "imap.gmail.com", port: 993, secure: true,
-        auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
-        logger: false, tls: { rejectUnauthorized: false }
+        host: "imap.gmail.com",
+        port: 993,
+        secure: true,
+        auth: {
+            user: process.env.EMAIL_USER,
+            pass: process.env.EMAIL_PASS
+        },
+        logger: false,
+        tls: { rejectUnauthorized: false }
     });
 
     try {
@@ -80,15 +57,16 @@ async function procesarCorreos() {
 
         const sheets = google.sheets({ version: "v4", auth });
 
-        const spreadsheet = await sheets.spreadsheets.values.get({ 
-            spreadsheetId: process.env.SPREADSHEET_ID, 
-            range: "Clientes!A2:K1000" 
+        const spreadsheet = await sheets.spreadsheets.values.get({
+            spreadsheetId: process.env.SPREADSHEET_ID,
+            range: "Clientes!A2:K1000"
         });
 
         const clientes = spreadsheet.data.values || [];
 
+        // 🔥 buscar correos de netflix
         let list = await client.search({ from: "netflix" });
-        
+
         for (let seq of list.slice(-10).reverse()) {
 
             let meta = await client.fetchOne(seq, { envelope: true });
@@ -99,29 +77,32 @@ async function procesarCorreos() {
             let msg = await client.fetchOne(seq, { source: true });
             let parsed = await simpleParser(msg.source);
 
-            let text = (parsed.text || "").replace(/\s+/g, ' '); 
+            let text = (parsed.text || "").replace(/\s+/g, ' ');
             let correoCuenta = (meta.envelope.to[0].address || "").toLowerCase().trim();
 
+            // 🔥 detectar perfil
             const matchSolicitud = text.match(/Solicitud de\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ ]+)/i);
             const matchHola = text.match(/Hola,\s*([^:]+):/i);
 
-            let perfilDelCorreo = matchSolicitud 
-                ? matchSolicitud[1].trim() 
+            let perfilDelCorreo = matchSolicitud
+                ? matchSolicitud[1].trim()
                 : (matchHola ? matchHola[1].trim() : "DESCONOCIDO");
 
-            if (parsed.text && perfilDelCorreo !== "DESCONOCIDO") {
+            if (perfilDelCorreo !== "DESCONOCIDO") {
 
                 const perfilBusqueda = perfilDelCorreo.toLowerCase().trim();
                 const llaveSpam = `${correoCuenta}-${perfilBusqueda}`;
                 const ahora = Date.now();
 
+                // anti spam 5 min
                 if (enviosRecientes.has(llaveSpam) && (ahora - enviosRecientes.get(llaveSpam) < 300000)) {
                     correosProcesados.add(uid);
                     continue;
                 }
 
-                const coincidencias = clientes.filter(c => 
-                    (c[4] || "").toLowerCase().trim() === correoCuenta && 
+                // 🔥 buscar cliente en hoja
+                const coincidencias = clientes.filter(c =>
+                    (c[4] || "").toLowerCase().trim() === correoCuenta &&
                     (c[6] || "").toLowerCase().trim() === perfilBusqueda
                 );
 
@@ -129,19 +110,22 @@ async function procesarCorreos() {
 
                     for (let cliente of coincidencias) {
 
-                        const contenidoCorreo = parsed.text || "No se pudo leer el correo";
+                        // 🔥 LINK A TU PANEL
+                        const link = `https://codigos-production.up.railway.app/?perfil=${encodeURIComponent(perfilDelCorreo)}&cliente=${encodeURIComponent(cliente[1])}`;
 
-                        const nombreArchivo = `correo-${Date.now()}.pdf`;
+                        const msjCliente = `🏠 *NETFLIX*
 
-                        await crearPDF(contenidoCorreo, nombreArchivo);
+Hola *${cliente[1]}*,
 
-                        await enviarPDF(cliente[2], nombreArchivo);
+Tienes una solicitud de activación.
 
-                        // borrar PDF después de enviar
-                        fs.unlinkSync(nombreArchivo);
+👉 Entra aquí:
+${link}`;
+
+                        await enviarWA(cliente[2], msjCliente);
                     }
 
-                    console.log(`✅ PDF enviado a ${perfilDelCorreo}`);
+                    console.log(`✅ Enviado a ${perfilDelCorreo}`);
                     enviosRecientes.set(llaveSpam, ahora);
                 }
 
@@ -157,5 +141,6 @@ async function procesarCorreos() {
     }
 }
 
+// iniciar
 procesarCorreos();
 setInterval(procesarCorreos, RECHECK_TIME);
