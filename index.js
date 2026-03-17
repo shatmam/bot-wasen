@@ -10,7 +10,7 @@ const EMAIL_PASS = process.env.EMAIL_PASS;
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID; 
 const WA_TOKEN = process.env.WA_TOKEN; 
 const ADMIN_PHONE = process.env.ADMIN_PHONE; 
-const RECHECK_TIME = 1 * 60 * 1000; // Revisar cada 1 minuto
+const RECHECK_TIME = 15 * 1000; // 🚀 AHORA REVISA CADA 15 SEGUNDOS
 
 let botIniciado = false;
 
@@ -18,7 +18,6 @@ async function enviarWA(tel, msj) {
     try {
         let numero = tel.toString().replace(/[^0-9]/g, "");
         if (!numero.startsWith("1") && numero.length === 10) numero = "1" + numero;
-        
         await fetch("https://www.wasenderapi.com/api/send-message", {
             method: "POST",
             headers: { "Authorization": `Bearer ${WA_TOKEN}`, "Content-Type": "application/json" },
@@ -28,7 +27,7 @@ async function enviarWA(tel, msj) {
 }
 
 async function procesarCorreos() {
-    console.log("🔍 Revisando Gmail y Google Sheets...");
+    console.log("⚡ Revisión rápida iniciada...");
     const client = new ImapFlow({
         host: "imap.gmail.com", port: 993, secure: true,
         auth: { user: EMAIL_USER, pass: EMAIL_PASS },
@@ -36,11 +35,9 @@ async function procesarCorreos() {
     });
 
     try {
-        // 1. Conexión a Gmail
         await client.connect();
         await client.mailboxOpen('INBOX');
 
-        // 2. Conexión a Google Sheets
         const auth = new google.auth.GoogleAuth({
             credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
             scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"]
@@ -52,58 +49,58 @@ async function procesarCorreos() {
         });
         const clientes = spreadsheet.data.values || [];
 
-        // Notificación de primer arranque para el Admin
         if (!botIniciado) {
-            await enviarWA(ADMIN_PHONE, `🚀 *BOT INICIADO CORRECTAMENTE*\n\n📊 *Sincronización*: SÍ\n👥 *Clientes leídos*: ${clientes.length}\n📧 *Correo*: ${EMAIL_USER}\n\nEl sistema está vigilando correos nuevos cada minuto.`);
+            await enviarWA(ADMIN_PHONE, `🚀 *BOT ULTRA-RÁPIDO ACTIVO*\n\nRevisando cada 15 segundos.\nSincronizados ${clientes.length} clientes.\nValidando por Correo y Perfil (Columna G).`);
             botIniciado = true;
-            console.log(`✅ Bot activo. Sincronizados ${clientes.length} clientes.`);
         }
 
-        // 3. Buscar correos NO LEÍDOS de Netflix
+        // Buscar correos NO LEÍDOS de Netflix
         let list = await client.search({ from: "netflix", unseen: true });
 
         for (let seq of list) {
             let msg = await client.fetchOne(seq, { source: true, envelope: true });
             let parsed = await simpleParser(msg.source);
-            let subject = (msg.envelope.subject || "").toLowerCase();
-            let html = parsed.html || parsed.textAsHtml || "";
             let contenido = (parsed.text || "").toLowerCase();
+            let html = parsed.html || parsed.textAsHtml || "";
 
-            // Filtros de utilidad
-            const esUtil = subject.includes("código") || subject.includes("codigo") || subject.includes("temporal") || subject.includes("hogar");
-            const esCambio = subject.includes("contraseña") || subject.includes("password") || contenido.includes("restablecer");
+            // 1. Extraer Perfil del cuerpo del correo
+            const perfilMatch = contenido.match(/solicitud de\s+([^\n,]+)/i);
+            const perfilDelCorreo = perfilMatch ? perfilMatch[1].trim().toLowerCase() : null;
 
-            if (esUtil && !esCambio) {
-                const correoDestino = (msg.envelope.to[0].address || "").toLowerCase().trim();
-                const linkMatch = html.match(/href="([^"]*update-home[^"]*)"/) || 
-                                 html.match(/href="([^"]*confirm-account[^"]*)"/);
+            if (perfilDelCorreo) {
+                const correoCuenta = (msg.envelope.to[0].address || "").toLowerCase().trim();
                 
-                if (linkMatch) {
-                    const elLink = linkMatch[1];
-                    const cliente = clientes.find(c => (c[4] || "").toLowerCase().trim() === correoDestino);
+                // 2. Buscar cliente por CORREO (Columna E/c[4]) y PERFIL (Columna G/c[6])
+                const clienteCorrecto = clientes.find(c => 
+                    (c[4] || "").toLowerCase().trim() === correoCuenta && 
+                    (c[6] || "").toLowerCase().trim() === perfilDelCorreo
+                );
 
-                    if (cliente) {
-                        // Enviar al cliente
-                        await enviarWA(cliente[2], `🏠 *ACTUALIZACIÓN NETFLIX*\n\nHola *${cliente[1]}*, activa tu TV aquí:\n\n${elLink}`);
-                        // Reportar éxito al Admin
-                        await enviarWA(ADMIN_PHONE, `✅ *LINK ENVIADO*\n👤: ${cliente[1]}\n📧: ${correoDestino}\n📱: ${cliente[2]}`);
-                    } else {
-                        // Reportar correo sin registro en Excel
-                        await enviarWA(ADMIN_PHONE, `⚠️ *CUENTA DESCONOCIDA*\nLlegó un link para: ${correoDestino}\nPero no está en el Excel.\n\n🔗 Link: ${elLink}`);
+                if (clienteCorrecto) {
+                    const linkMatch = html.match(/href="([^"]*update-home[^"]*)"/) || 
+                                     html.match(/href="([^"]*confirm-account[^"]*)"/);
+
+                    if (linkMatch) {
+                        const elLink = linkMatch[1];
+                        const msj = `🏠 *ACTUALIZACIÓN NETFLIX*\n\nHola *${clienteCorrecto[1]}*, detectamos tu solicitud en el perfil *${perfilDelCorreo.toUpperCase()}*.\n\nPulsa el botón para activar tu TV:\n\n${elLink}\n\n_Vence en 15 minutos._`;
+                        
+                        await enviarWA(clienteCorrecto[2], msj);
+                        await enviarWA(ADMIN_PHONE, `✅ *ENVIADO*: ${clienteCorrecto[1]} (Perfil ${perfilDelCorreo}) de la cuenta ${correoCuenta}`);
                     }
+                } else {
+                    // Si el perfil no coincide con nadie en el Excel
+                    await enviarWA(ADMIN_PHONE, `⚠️ *PERFIL NO ASIGNADO*\nAlguien pidió acceso en el perfil "${perfilDelCorreo}" para ${correoCuenta}, pero nadie tiene ese perfil en el Excel.`);
                 }
             }
-            // Marcar como leído
+            // Marcar como leído para no repetir en 15 segundos
             await client.messageFlagsAdd(seq, ['\\Seen']);
         }
         await client.logout();
     } catch (e) {
-        console.log("❌ Error fatal:", e.message);
-        await enviarWA(ADMIN_PHONE, `🚨 *ERROR CRÍTICO*: ${e.message}`);
+        console.log("❌ Error:", e.message);
         if (client) await client.logout().catch(() => {});
     }
 }
 
-// Ejecución cíclica
 procesarCorreos();
 setInterval(procesarCorreos, RECHECK_TIME);
