@@ -1,20 +1,19 @@
 {
-  "name": "netflix-wa-bot",
+{
+  "name": "bot-netflix-notificador",
   "version": "1.0.0",
-  "description": "Bot automático de reenvío de Netflix a WhatsApp",
+  "description": "Bot para notificar solicitudes de Netflix vía WhatsApp",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
- {
+  },
   "dependencies": {
     "dotenv": "^16.4.5",
-    "imapflow": "^1.0.152",
-    "mailparser": "^3.6.7",
-    "googleapis": "^133.0.0",
-    "node-fetch": "^2.6.7",
-    "pdfkit": "^0.15.0",
-    "form-data": "^4.0.0"
-  }
+    "googleapis": "^126.0.0",
+    "imapflow": "^1.0.158",
+    "mailparser": "^3.7.1",
+    "node-fetch": "^2.7.0"
+  },
   "engines": {
     "node": ">=18.0.0"
   }
