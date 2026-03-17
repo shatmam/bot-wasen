@@ -8,7 +8,6 @@ const ADMIN_PHONE = process.env.ADMIN_PHONE;
 const WA_TOKEN = process.env.WA_TOKEN;
 const RECHECK_TIME = 1 * 60 * 1000; 
 
-// Guardamos ID del mensaje + Perfil para no repetir exactamente el mismo aviso
 const correosProcesados = new Set();
 const enviosRecientes = new Map();
 
@@ -25,7 +24,7 @@ async function enviarWA(tel, msj) {
 }
 
 async function procesarCorreos() {
-    console.log("🔍 Revisando solicitudes múltiples por perfil...");
+    console.log("🔍 Escaneando perfiles solicitantes...");
     const client = new ImapFlow({
         host: "imap.gmail.com", port: 993, secure: true,
         auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
@@ -55,30 +54,38 @@ async function procesarCorreos() {
                 let msgData = await client.fetchOne(seq, { envelope: true, source: true });
                 let msgId = msgData.envelope.messageId;
                 let parsed = await simpleParser(msgData.source);
+                
+                // Limpieza de texto para evitar errores de captura
                 let text = (parsed.text || "").replace(/\s+/g, ' '); 
                 let correoCuenta = (msgData.envelope.to[0].address || "").toLowerCase().trim();
 
-                // Extraemos el perfil (Nombre)
+                // 🔥 CAMBIO CLAVE: Prioridad absoluta a "Solicitud de [Perfil]"
+                // Buscamos primero el perfil que pide, no a quien saludan.
                 const matchSolicitud = text.match(/Solicitud de\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ ]+)/i);
-                const matchHola = text.match(/Hola,\s*([^:]+):/i);
-                let perfilDelCorreo = matchSolicitud ? matchSolicitud[1].trim() : (matchHola ? matchHola[1].trim() : null);
+                
+                let perfilDelCorreo = null;
+                if (matchSolicitud) {
+                    perfilDelCorreo = matchSolicitud[1].trim();
+                } else {
+                    // Si no dice "Solicitud de", buscamos el saludo como plan B
+                    const matchHola = text.match(/Hola,\s*([^:]+):/i);
+                    if (matchHola) perfilDelCorreo = matchHola[1].trim();
+                }
 
                 if (perfilDelCorreo) {
                     const perfilBusqueda = perfilDelCorreo.toLowerCase().trim();
-                    // CLAVE: La llave de procesado ahora incluye el PERFIL
                     const llaveProcesado = `${msgId}-${perfilBusqueda}`;
                     const llaveSpam = `${correoCuenta}-${perfilBusqueda}`;
                     const ahora = Date.now();
 
                     if (correosProcesados.has(llaveProcesado)) continue;
 
-                    // Anti-Spam por perfil (5 min)
                     if (enviosRecientes.has(llaveSpam) && (ahora - enviosRecientes.get(llaveSpam) < 300000)) {
                         correosProcesados.add(llaveProcesado);
                         continue;
                     }
 
-                    // Buscamos en el Excel
+                    // Buscamos en el Excel que coincida Correo (Columna E/Index 4) y Perfil (Columna G/Index 6)
                     const coincidencias = clientes.filter(c => 
                         (c[4] || "").toLowerCase().trim() === correoCuenta && 
                         (c[6] || "").toLowerCase().trim() === perfilBusqueda
@@ -87,17 +94,16 @@ async function procesarCorreos() {
                     if (coincidencias.length > 0) {
                         for (let cliente of coincidencias) {
                             const msjCliente = `📺 *ACTUALIZACIÓN NETFLIX*\n\n` +
-                                `Hola *${cliente[1]}*, se solicitó acceso para el perfil *${perfilDelCorreo}*.\n\n` +
+                                `Hola *${cliente[1]}*, se detectó una solicitud para el perfil: *${perfilDelCorreo}*.\n\n` +
                                 `👉 *Obtén tu código aquí:* \nhttps://codigos-production.up.railway.app/`;
                             
                             await enviarWA(cliente[2], msjCliente);
-                            console.log(`✅ Enviado a ${perfilDelCorreo} de la cuenta ${correoCuenta}`);
+                            console.log(`✅ Enviado a perfil: ${perfilDelCorreo}`);
                         }
                         enviosRecientes.set(llaveSpam, ahora); 
                     } else {
-                        console.log(`⚠️ No hay coincidencia en Excel para: ${perfilDelCorreo} (${correoCuenta})`);
+                        console.log(`⚠️ Perfil "${perfilDelCorreo}" no coincide con el Excel para la cuenta ${correoCuenta}`);
                     }
-                    // Marcamos este mensaje y este perfil como listos
                     correosProcesados.add(llaveProcesado);
                 }
             } catch (err) {
