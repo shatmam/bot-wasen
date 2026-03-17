@@ -1,0 +1,19 @@
+{
+  "name": "netflix-wa-bot",
+  "version": "1.0.0",
+  "description": "Bot automático de reenvío de Netflix a WhatsApp",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "googleapis": "^122.0.0",
+    "imapflow": "^1.0.141",
+    "mailparser": "^3.6.5",
+    "node-fetch": "^2.6.7"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
