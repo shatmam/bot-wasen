@@ -97,4 +97,16 @@ async function procesarCorreos() {
                     await enviarWA(ADMIN_PHONE, `✅ *ENVIADO*: ${perfilDelCorreo} (${correoCuenta})`);
                     enviosRecientes.set(llaveSpam, ahora); 
                 } else {
-                    await enviarWA(ADMIN_PHONE, `⚠️ *SIN REGISTRO*: ${perfilDelCorreo} en ${correo
+                    await enviarWA(ADMIN_PHONE, `⚠️ *SIN REGISTRO*: ${perfilDelCorreo} en ${correoCuenta}`);
+                }
+                correosProcesados.add(uid);
+            }
+        }
+        await client.logout();
+    } catch (e) {
+        if (client) await client.logout().catch(() => {});
+    }
+}
+
+procesarCorreos();
+setInterval(procesarCorreos, RECHECK_TIME);
