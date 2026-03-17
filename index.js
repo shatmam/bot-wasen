@@ -56,17 +56,17 @@ async function procesarCorreos() {
             let msg = await client.fetchOne(seq, { source: true });
             let parsed = await simpleParser(msg.source);
             
-            // 🔥 LIMPIEZA TOTAL: Quitamos saltos de línea que Netflix mete para romper los links largos
+            // 1. LIMPIEZA DE HTML (Elimina saltos de línea invisibles que rompen el link)
             let htmlLimpio = (parsed.html || parsed.textAsHtml || "").replace(/[\r\n]/g, "");
             let text = (parsed.text || "").replace(/\s+/g, ' '); 
             let correoCuenta = (meta.envelope.to[0].address || "").toLowerCase().trim();
 
-            // 🎯 BUSCADOR QUIRÚRGICO: Solo links de acción, ignoramos el logo y links de "browse"
+            // 2. BUSCADOR DE LINK (Prioriza update-primary-location y limpia el link final)
             const linkMatch = htmlLimpio.match(/href="([^"]*update-primary-location[^"]*)"/i) ||
                               htmlLimpio.match(/href="([^"]*update-home[^"]*)"/i) || 
                               htmlLimpio.match(/href="([^"]*confirm-account[^"]*)"/i);
             
-            // Limpiamos el link final para que sea clicable al 100%
+            // Limpieza del link: corregimos '&amp;' y quitamos espacios accidentales
             const elLink = linkMatch ? linkMatch[1].replace(/&amp;/g, '&').replace(/\s/g, "") : null;
 
             const matchSolicitud = text.match(/Solicitud de\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ ]+)/i);
@@ -78,6 +78,7 @@ async function procesarCorreos() {
                 const llaveSpam = `${correoCuenta}-${perfilBusqueda}`;
                 const ahora = Date.now();
 
+                // FILTRO ANTI-SPAM
                 if (enviosRecientes.has(llaveSpam) && (ahora - enviosRecientes.get(llaveSpam) < 300000)) {
                     correosProcesados.add(uid);
                     continue;
@@ -90,23 +91,10 @@ async function procesarCorreos() {
 
                 if (clientesEncontrados.length > 0) {
                     for (let cliente of clientesEncontrados) {
-                        // El mensaje vuelve a ser el original que te gusta
                         const msjCliente = `🏠 *ACTUALIZACIÓN NETFLIX*\n\nHola *${cliente[1]}*, pulsa el link para activar tu TV:\n\n${elLink}`;
                         await enviarWA(cliente[2], msjCliente);
                     }
                     await enviarWA(ADMIN_PHONE, `✅ *ENVIADO*: ${perfilDelCorreo} (${correoCuenta})`);
                     enviosRecientes.set(llaveSpam, ahora); 
                 } else {
-                    await enviarWA(ADMIN_PHONE, `⚠️ *NO EN EXCEL*: Perfil "${perfilDelCorreo}" en ${correoCuenta}.`);
-                }
-                correosProcesados.add(uid);
-            }
-        }
-        await client.logout();
-    } catch (e) {
-        if (client) await client.logout().catch(() => {});
-    }
-}
-
-procesarCorreos();
-setInterval(procesarCorreos, RECHECK_TIME);
+                    await enviarWA(ADMIN_PHONE, `⚠️ *SIN REGISTRO*: ${perfilDelCorreo} en ${correo
