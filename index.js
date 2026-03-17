@@ -6,10 +6,10 @@ const fetch = require("node-fetch");
 
 const ADMIN_PHONE = process.env.ADMIN_PHONE; 
 const WA_TOKEN = process.env.WA_TOKEN;
-const RECHECK_TIME = 5 * 60 * 1000; 
+const RECHECK_TIME = 1 * 60 * 1000; // Revisión cada 1 minuto
 
-let botIniciado = false;
 const correosProcesados = new Set();
+let botIniciado = false;
 
 async function enviarWA(tel, msj) {
     try {
@@ -46,12 +46,12 @@ async function procesarCorreos() {
         const clientes = spreadsheet.data.values || [];
 
         if (!botIniciado) {
-            await enviarWA(ADMIN_PHONE, `🕵️ *BOT ACTIVO*\nPriorizando "Solicitud de" (Abajo).\nRevisando cada 5 min.`);
+            await enviarWA(ADMIN_PHONE, `🚀 *BOT ACTIVO*: Escaneando ${clientes.length} clientes cada minuto.`);
             botIniciado = true;
         }
 
         let list = await client.search({ from: "netflix" });
-        let ultimos = list.slice(-5);
+        let ultimos = list.slice(-5); // Solo mira los 5 más recientes para ahorrar recursos
 
         for (let seq of ultimos) {
             if (correosProcesados.has(seq)) continue;
@@ -62,39 +62,32 @@ async function procesarCorreos() {
             let html = parsed.html || "";
             let correoCuenta = (msg.envelope.to[0].address || "").toLowerCase().trim();
 
-            // 🎯 LÓGICA DE PRIORIDAD:
-            // Buscamos primero "Solicitud de X" (que es lo que está abajo en el cuadro)
-            const matchSolicitud = text.match(/Solicitud de\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]+)/i);
-            // Si no existe, buscamos el "Hola, X:"
-            const matchHola = text.match(/Hola,\s*([^:]+):/i);
-            
-            let perfilDelCorreo = "no detectado";
-            if (matchSolicitud) {
-                perfilDelCorreo = matchSolicitud[1].trim().toLowerCase();
-            } else if (matchHola) {
-                perfilDelCorreo = matchHola[1].trim().toLowerCase();
-            }
+            // 🎯 CAPTURA DE PERFIL: Prioriza el texto "Solicitud de X" del cuadro rojo
+            const matchSolicitud = text.match(/Solicitud de\s+([a-zA-Z0-9]+)/i);
+            let perfilDelCorreo = matchSolicitud ? matchSolicitud[1].trim().toLowerCase() : null;
 
+            // 🎯 CAPTURA DE LINK
             const regexLink = /https:\/\/www\.netflix\.com\/[^\s"<>]+(?:confirm-account|update-home)[^\s"<>]+/gi;
             const links = html.match(regexLink) || text.match(regexLink);
 
-            if (links && perfilDelCorreo !== "no detectado") {
+            if (perfilDelCorreo && links) {
                 const elLink = links[0];
+                // Busca en Excel: Col E (Cuenta) y Col G (Perfil)
                 const cliente = clientes.find(c => 
                     (c[4] || "").toLowerCase().trim() === correoCuenta && 
                     (c[6] || "").toLowerCase().trim() === perfilDelCorreo
                 );
 
                 if (cliente) {
-                    await enviarWA(cliente[2], `🏠 *SOLICITUD NETFLIX*\n\nHola *${cliente[1]}*, detectamos tu solicitud en el perfil *${perfilDelCorreo.toUpperCase()}*.\n\nActiva tu TV aquí:\n${elLink}`);
-                    await enviarWA(ADMIN_PHONE, `✅ *PROCESADO*: ${correoCuenta} (Perfil ${perfilDelCorreo})`);
-                    correosProcesados.add(seq);
+                    // Envía al cliente usando el número de la Columna C
+                    await enviarWA(cliente[2], `🏠 *SOLICITUD NETFLIX*\n\nHola *${cliente[1]}*, activa tu TV aquí:\n${elLink}`);
+                    await enviarWA(ADMIN_PHONE, `✅ *ENVIADO*: ${cliente[1]} (${perfilDelCorreo}) para ${correoCuenta}`);
                 } else {
-                    // Si detecta perfil pero no está en Excel, te avisa a ti una sola vez
-                    await enviarWA(ADMIN_PHONE, `⚠️ *SIN DUEÑO*: Perfil "${perfilDelCorreo}" en ${correoCuenta}.`);
-                    correosProcesados.add(seq); 
+                    await enviarWA(ADMIN_PHONE, `⚠️ *SIN REGISTRO*: Perfil "${perfilDelCorreo}" en cuenta ${correoCuenta}. No está en tu Excel.`);
                 }
             }
+            // Marca como procesado en memoria para no repetir
+            correosProcesados.add(seq);
         }
         await client.logout();
     } catch (e) {
