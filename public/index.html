@@ -1,929 +1,118 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Super Streaming Admin</title>
+<meta charset="UTF-8">
+<title>Panel</title>
 
-  <style>
-    :root{
-      --bg0:#070A16;
-      --bg1:#0B1026;
-      --bg2:#0E173A;
+<style>
+body {
+  font-family: Arial;
+  background: #0f172a;
+  color: white;
+  padding: 20px;
+}
 
-      --line: rgba(255,255,255,.10);
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
 
-      --txt:#F6F8FF;
-      --muted:#B5C0FF;
+th, td {
+  padding: 10px;
+  text-align: center;
+}
 
-      --red:#ff3b5f;
-      --green:#18c964;
-      --yellow:#f5b301;
-      --cyan:#23d5f2;
-      --blue:#4f8cff;
-      --purple:#b094ff;
+th {
+  background: #1e293b;
+}
 
-      --shadow: 0 20px 70px rgba(0,0,0,.55);
-      --shadow2: 0 10px 30px rgba(0,0,0,.45);
-    }
+button {
+  padding: 6px 10px;
+  background: #22c55e;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+</style>
 
-    *{box-sizing:border-box}
-    html,body{height:100%}
-    body{
-      margin:0;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      color:var(--txt);
-      background:
-        radial-gradient(900px 520px at 12% 8%, rgba(79,140,255,.22), transparent 60%),
-        radial-gradient(900px 600px at 88% 8%, rgba(176,148,255,.20), transparent 55%),
-        radial-gradient(820px 520px at 50% 92%, rgba(35,213,242,.12), transparent 62%),
-        linear-gradient(180deg, var(--bg0), var(--bg1) 40%, var(--bg2));
-    }
-
-    .wrap{max-width:1400px;margin:0 auto;padding:22px 18px 70px}
-
-    .topbar{
-      display:flex;align-items:center;justify-content:space-between;
-      gap:14px;flex-wrap:wrap;
-      margin-bottom:18px;
-    }
-    .brand{display:flex;align-items:center;gap:14px;}
-    .logo{
-      width:50px;height:50px;border-radius:18px;
-      display:grid;place-items:center;
-      font-weight:1000;letter-spacing:.6px;
-      background: linear-gradient(135deg, rgba(79,140,255,.95), rgba(176,148,255,.95));
-      border:1px solid rgba(255,255,255,.10);
-      box-shadow: 0 18px 50px rgba(79,140,255,.16);
-      user-select:none;
-    }
-    .title{display:flex;flex-direction:column;gap:4px;}
-    .title h1{margin:0;font-size:22px;line-height:1}
-    .title .sub{margin:0;color:var(--muted);font-size:12px}
-
-    .top-actions{
-      display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;
-    }
-
-    .k{font-size:12px;color:var(--muted);margin-bottom:6px}
-    .inline{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
-
-    .input, select{
-      width:100%;
-      padding:12px 14px;
-      border-radius:14px;
-      border:1px solid var(--line);
-      background: rgba(10,14,35,.65);
-      color:var(--txt);
-      outline:none;
-      transition:.15s;
-      box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
-    }
-    .input::placeholder{color:rgba(181,192,255,.70)}
-    .input:focus, select:focus{
-      border-color: rgba(79,140,255,.55);
-      box-shadow: 0 0 0 4px rgba(79,140,255,.18);
-    }
-    #adminKey{width:220px}
-
-    .btn{
-      border:0;cursor:pointer;
-      padding:12px 16px;
-      border-radius:14px;
-      font-weight:900;
-      color:#06101a;
-      background: linear-gradient(135deg, rgba(35,213,242,.95), rgba(79,140,255,.95));
-      box-shadow: var(--shadow2);
-      transition:.12s;
-      white-space:nowrap;
-      user-select:none;
-    }
-    .btn:hover{filter:brightness(1.08)}
-    .btn:active{transform:translateY(1px)}
-    .btn-outline{
-      color:var(--txt);
-      background: rgba(255,255,255,.06);
-      border:1px solid rgba(255,255,255,.12);
-      box-shadow:none;
-    }
-    .btn-outline:hover{background: rgba(255,255,255,.10)}
-    .btn-green{
-      color:#06101a;
-      background: linear-gradient(135deg, rgba(24,201,100,.95), rgba(35,213,242,.75));
-    }
-
-    .kpis{
-      display:grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap:16px;
-      margin-bottom:18px;
-    }
-    @media (max-width: 980px){ .kpis{grid-template-columns:1fr; } }
-
-    .kpi{
-      background: rgba(12,16,35,.62);
-      border:1px solid rgba(255,255,255,.10);
-      border-radius: 22px;
-      box-shadow: var(--shadow);
-      padding: 22px 18px;
-      text-align:center;
-      backdrop-filter: blur(16px);
-      position:relative;
-      overflow:hidden;
-    }
-    .kpi::before{
-      content:"";
-      position:absolute; inset:-2px;
-      background:
-        radial-gradient(420px 180px at 25% 0%, rgba(79,140,255,.18), transparent 60%),
-        radial-gradient(420px 180px at 80% 0%, rgba(176,148,255,.16), transparent 60%);
-      pointer-events:none;
-    }
-    .kpi .n{
-      position:relative;
-      font-size:44px;
-      font-weight:1000;
-      letter-spacing:.5px;
-      margin:0;
-    }
-    .kpi .lbl{
-      position:relative;
-      margin-top:6px;
-      color: rgba(181,192,255,.85);
-      font-size:12px;
-      letter-spacing:1.4px;
-      text-transform:uppercase;
-    }
-    .kpi.red .n{ color: var(--red); }
-    .kpi .tiny{
-      position:relative;
-      margin-top:8px;
-      font-size:12px;
-      color:rgba(181,192,255,.78);
-    }
-
-    .panel{
-      background: rgba(12,16,35,.62);
-      border:1px solid rgba(255,255,255,.10);
-      border-radius: 22px;
-      box-shadow: var(--shadow);
-      padding:18px;
-      backdrop-filter: blur(16px);
-    }
-
-    .assign{
-      display:grid;
-      grid-template-columns: 1.3fr 1.3fr 1.2fr auto;
-      gap:14px;
-      align-items:end;
-      margin-bottom:14px;
-    }
-    @media (max-width: 1100px){ .assign{grid-template-columns:1fr;} }
-
-    .assign2{
-      display:grid;
-      grid-template-columns: 2fr 1fr;
-      gap:14px;
-      align-items:end;
-      margin-bottom:16px;
-    }
-    @media (max-width: 1100px){ .assign2{grid-template-columns:1fr;} }
-
-    .tablewrap{
-      border-radius: 18px;
-      border:1px solid rgba(255,255,255,.10);
-      overflow:auto;
-      background: rgba(9,12,28,.35);
-    }
-    table{
-      width:100%;
-      border-collapse:collapse;
-      min-width: 1200px;
-    }
-    thead th{
-      position:sticky; top:0; z-index:1;
-      background: rgba(9,12,28,.92);
-      backdrop-filter: blur(10px);
-      border-bottom:1px solid rgba(255,255,255,.08);
-    }
-    th, td{
-      padding: 16px 14px;
-      border-bottom:1px solid rgba(255,255,255,.06);
-      font-size: 13px;
-      vertical-align: middle;
-    }
-    th{
-      color: rgba(181,192,255,.88);
-      font-weight:900;
-      text-transform:uppercase;
-      font-size:11px;
-      letter-spacing:.9px;
-      white-space:nowrap;
-    }
-    tbody tr:hover{ background: rgba(255,255,255,.04); }
-
-    .svc{
-      font-weight:1000;
-      color: var(--cyan);
-      letter-spacing:.4px;
-    }
-
-    .badge-status{
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      padding:7px 12px;
-      border-radius: 999px;
-      font-weight:1000;
-      font-size:12px;
-      border:1px solid rgba(255,255,255,.10);
-      background: rgba(255,255,255,.06);
-      white-space:nowrap;
-    }
-    .badge-status.red{ background: rgba(255,59,95,.14); border-color: rgba(255,59,95,.32); color:#ffd5dc; }
-    .badge-status.green{ background: rgba(24,201,100,.14); border-color: rgba(24,201,100,.32); color:#d6ffe8; }
-    .badge-status.gray{ background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.14); color:#e9eeff; }
-
-    .actions{
-      display:flex;
-      gap:10px;
-      flex-wrap:wrap;
-    }
-    .a-btn{
-      border:0;
-      cursor:pointer;
-      padding:10px 14px;
-      border-radius: 12px;
-      font-weight:1000;
-      font-size:12px;
-      color:#06101a;
-      transition:.12s;
-      user-select:none;
-      white-space:nowrap;
-    }
-    .a-btn:hover{filter:brightness(1.06)}
-    .a-btn:active{transform:translateY(1px)}
-    .a-copy{ background: linear-gradient(135deg, rgba(35,213,242,.98), rgba(79,140,255,.92)); }
-    .a-renew{ background: linear-gradient(135deg, rgba(24,201,100,.98), rgba(24,201,100,.70)); }
-    .a-move{ background: linear-gradient(135deg, rgba(245,179,1,.98), rgba(245,179,1,.72)); }
-    .a-del{ background: linear-gradient(135deg, rgba(255,59,95,.98), rgba(255,59,95,.72)); color:#fff; }
-
-    .mini{color: rgba(181,192,255,.75); font-size:12px; margin-top: 3px;}
-
-    #status{ margin: 10px 0 12px; color: rgba(181,192,255,.78); font-size: 12px; }
-    .err{
-      display:none;
-      margin: 10px 0 12px;
-      padding:12px 14px;
-      border-radius:14px;
-      border:1px solid rgba(255,59,95,.40);
-      background: rgba(255,59,95,.14);
-      color:#ffd5dc;
-      white-space: pre-wrap;
-    }
-
-    #availBySvc{
-      margin-top:10px;
-      display:flex;
-      gap:10px;
-      flex-wrap:wrap;
-    }
-    .chip{
-      display:inline-flex;
-      align-items:center;
-      gap:8px;
-      padding:8px 12px;
-      border-radius:999px;
-      border:1px solid rgba(255,255,255,.10);
-      background: rgba(255,255,255,.06);
-      color: rgba(233,238,255,.92);
-      font-size:12px;
-      font-weight:900;
-      white-space:nowrap;
-    }
-    .chip b{color:#fff}
-  </style>
 </head>
-
 <body>
-  <div class="wrap">
 
-    <div class="topbar">
-      <div class="brand">
-        <div class="logo">SS</div>
-        <div class="title">
-          <h1>Panel de Clientes</h1>
-          <p class="sub">renovaciones • asignaciones • control</p>
-        </div>
-      </div>
+<h1>Panel de Clientes</h1>
+<h2 id="total"></h2>
+
+<table>
+<thead>
+<tr>
+<th>Correo</th>
+<th>WhatsApp</th>
+<th>Revendedor</th>
+<th>Días</th>
+<th>Ganancia</th>
+<th>Acción</th>
+</tr>
+</thead>
+<tbody id="tabla"></tbody>
+</table>
+
+<script>
+const API = "https://TU-APP.railway.app"; // 👈 CAMBIA ESTO
+
+async function cargar() {
+  const res = await fetch(API + "/clientes");
+  const data = await res.json();
+
+  const tabla = document.getElementById("tabla");
+  tabla.innerHTML = "";
+
+  let total = 0;
+
+  data.forEach(c => {
+    total += c.ganancia;
+
+    let color = "white";
+    if (c.dias <= 0) color = "red";
+    else if (c.dias <= 3) color = "orange";
+
+    const fila = `
+      <tr>
+        <td>${c.correo}</td>
+        <td>${c.whatsapp}</td>
+        <td>${c.revendedor}</td>
+        <td style="color:${color}">${c.dias}</td>
+        <td>RD$${c.ganancia}</td>
+        <td>
+          <button onclick="renovar(${c.id})">Renovar</button>
+        </td>
+      </tr>
+    `;
+
+    tabla.innerHTML += fila;
+  });
+
+  document.getElementById("total").innerText = "Total: RD$" + total;
+}
+
+async function renovar(id) {
+  let dias = prompt("Días a agregar:");
+
+  await fetch(API + "/renovar", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      id,
+      diasExtra: parseInt(dias)
+    })
+  });
+
+  alert("Renovado");
+  cargar();
+}
+
+cargar();
+</script>
 
-      <div class="top-actions">
-        <div>
-          <div class="k">Admin key (opcional)</div>
-          <input class="input" id="adminKey" placeholder="Admin key (opcional)" />
-        </div>
-
-        <button class="btn btn-outline" id="btnReload">Actualizar</button>
-
-        <div class="inline">
-          <div>
-            <div class="k">Auto</div>
-            <select id="autoOn" class="input" style="width:140px">
-              <option value="on" selected>Auto ON</option>
-              <option value="off">Auto OFF</option>
-            </select>
-          </div>
-          <div>
-            <div class="k">Cada (seg)</div>
-            <input id="autoSec" class="input" type="number" min="5" value="30" style="width:120px" />
-          </div>
-          <button class="btn btn-outline" id="btnAutoApply">Aplicar</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="kpis">
-      <div class="kpi">
-        <p class="n" id="cActivos">0</p>
-        <div class="lbl">ACTIVOS</div>
-        <div class="tiny">Clientes con días &gt; 3</div>
-      </div>
-
-      <div class="kpi red">
-        <p class="n" id="cVencidos">0</p>
-        <div class="lbl">VENCIDOS</div>
-        <div class="tiny">Días ≤ 0</div>
-      </div>
-
-      <div class="kpi">
-        <p class="n" id="cTotal">0</p>
-        <div class="lbl">TOTAL</div>
-        <div class="tiny">Clientes</div>
-      </div>
-    </div>
-
-    <div style="display:none"><span id="cPorVencer">0</span></div>
-
-    <div class="panel">
-
-      <div class="assign">
-        <div>
-          <div class="k">SERVICIO</div>
-          <select id="asSvc" class="input"></select>
-        </div>
-
-        <div>
-          <div class="k">CUENTA LIBRE</div>
-          <select id="asAccount" class="input"></select>
-        </div>
-
-        <div>
-          <div class="k">CLIENTE</div>
-          <input id="asName" class="input" placeholder="Nombre" />
-        </div>
-
-        <button id="btnAssign" class="btn btn-green">✓ ASIGNAR</button>
-      </div>
-
-      <div class="assign2">
-        <div>
-          <div class="k">TELÉFONO / DÍAS</div>
-          <div class="inline">
-            <input id="asTel" class="input" placeholder="Teléfono" style="min-width:260px" />
-            <input id="asDays" class="input" type="number" value="30" min="1" style="width:140px" />
-          </div>
-        </div>
-
-        <div>
-          <div class="k">ESTADOS</div>
-          <select id="f" class="input">
-            <option value="">TODOS LOS ESTADOS</option>
-            <option value="vencidos">VENCIDOS</option>
-            <option value="porvencer">POR VENCER</option>
-            <option value="activos">ACTIVOS</option>
-          </select>
-        </div>
-      </div>
-
-      <div>
-        <div class="k">BUSCAR CLIENTE O CUENTA…</div>
-        <input class="input" id="q" placeholder="Buscar cliente o cuenta..." />
-      </div>
-
-      <div id="status">Cargando…</div>
-      <div id="err" class="err"></div>
-
-      <div style="margin-top:10px; display:flex; gap:16px; flex-wrap:wrap; align-items:center;">
-        <div class="mini">
-          Disponibles: <b id="availTotal">0</b>
-          <span id="autoInfo" style="margin-left:10px"></span>
-        </div>
-      </div>
-
-      <div id="availBySvc"></div>
-      <div id="assignMsg" class="err" style="display:none"></div>
-
-      <div class="tablewrap" style="margin-top:14px;">
-        <table>
-          <thead>
-            <tr>
-              <th>SERVICIO</th>
-              <th>CUENTA</th>
-              <th>CLIENTE</th>
-              <th>TELÉFONO</th>
-              <th>ESTADO</th>
-              <th>ACCIONES DE CONTROL</th>
-            </tr>
-          </thead>
-          <tbody id="tb"></tbody>
-        </table>
-      </div>
-
-    </div>
-  </div>
-
-  <script>
-    let allRows = [];
-    let availableMapByService = {};
-    let autoTimer = null;
-    let lastLoadAt = 0;
-
-    const $ = (id) => document.getElementById(id);
-
-    function setStatus(t){ $("status").textContent = t; }
-    function showErr(msg){ const e=$("err"); e.style.display="block"; e.textContent=msg; }
-    function hideErr(){ const e=$("err"); e.style.display="none"; e.textContent=""; }
-
-    function esc(s){
-      return String(s ?? "")
-        .replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;")
-        .replaceAll('"',"&quot;").replaceAll("'","&#039;");
-    }
-
-    function headers(){
-      const k = $("adminKey").value.trim();
-      return k ? { "x-admin-key": k } : {};
-    }
-
-    async function api(path, opts = {}){
-      const res = await fetch(path, {
-        ...opts,
-        headers: { "Content-Type":"application/json", ...headers(), ...(opts.headers||{}) }
-      });
-      const data = await res.json().catch(()=> ({}));
-      if(!res.ok || data.ok === false){
-        throw new Error(data.error || `Error ${res.status}`);
-      }
-      return data;
-    }
-
-    async function apiFree(row){
-      try{
-        return await api("/api/free", { method:"POST", body: JSON.stringify({ row }) });
-      }catch(e){
-        return await api("/api/delete", { method:"POST", body: JSON.stringify({ row }) });
-      }
-    }
-
-    function formatDateDMY(iso){
-      const [y,m,d] = String(iso||"").split("-");
-      if(!y||!m||!d) return iso || "";
-      return `${d}-${m}-${y}`;
-    }
-
-    function buildWhatsappMessage({ nombre, servicio, correo, contrasena, perfil, pin, vence }) {
-      return `Hola ${nombre}! Aqui estan los detalles de tu cuenta de ${servicio}:
-
-*Correo:* ${correo}
-*Contrasena:* ${contrasena}
-*Perfil:* ${perfil}
-*PIN:* ${pin}
-
-*REGLAS DE ORO:*
-1. Solo se permite el uso en 1 DISPOSITIVO.
-2. No cambies el nombre del perfil.
-3. No modifiques la clave ni el correo.
-4. No compartas la cuenta con terceros.
-
-Tu servicio vence el ${formatDateDMY(vence)}.`;
-    }
-
-    async function copyText(t){
-      await navigator.clipboard.writeText(t);
-    }
-
-    function isDisponibleName(nombre){
-      return String(nombre || "").trim().toLowerCase() === "disponible";
-    }
-
-    // ✅ FILTRO MEJORADO: evita filas fantasma (aunque traigan codigo/row)
-    function isRowEmpty(r){
-      const servicio = String(r?.servicio ?? "").trim();
-      const nombre = String(r?.nombre ?? "").trim();
-      const telefono = String(r?.telefono ?? "").trim();
-
-      const correo = String(r?.correo ?? "").trim();
-      const contrasena = String(r?.contrasena ?? "").trim();
-      const perfil = String(r?.perfil ?? "").trim();
-      const pin = String(r?.pin ?? "").trim();
-      const vencimiento = String(r?.vencimiento ?? "").trim();
-
-      // si es "disponible" NO es vacía
-      const isDisponible = nombre.toLowerCase() === "disponible";
-      if (isDisponible) return false;
-
-      // datos útiles reales
-      const hasAccountData = !!(correo || contrasena || perfil || pin);
-      const hasClientData = !!(nombre || telefono);
-      const hasService = !!servicio;
-      const hasVence = !!vencimiento;
-
-      const useful = hasAccountData || hasClientData || hasService || hasVence;
-
-      // si no hay nada útil, es vacía
-      return !useful;
-    }
-
-    function svcLabel(s){
-      const v = String(s||"").trim();
-      return v ? v.toUpperCase() : "—";
-    }
-
-    function badgeEstado(r){
-      const dias = Number(r.dias);
-      if(r.bucket === "vencidos") return `<span class="badge-status red">${esc(dias)} DÍAS</span>`;
-      if(r.bucket === "porvencer") return `<span class="badge-status gray">${esc(dias)} DÍAS</span>`;
-      return `<span class="badge-status green">${esc(dias)} DÍAS</span>`;
-    }
-
-    function rebuildAvailableMap(){
-      availableMapByService = {};
-      for(const r of allRows){
-        if(isDisponibleName(r.nombre)){
-          const svc = (r.servicio || "OTROS").trim() || "OTROS";
-          if(!availableMapByService[svc]) availableMapByService[svc] = [];
-          availableMapByService[svc].push(r);
-        }
-      }
-    }
-
-    function fillAccountDropdown(){
-      const svc = $("asSvc").value;
-      const list = availableMapByService[svc] || [];
-      const sel = $("asAccount");
-      if(!svc || !list.length){
-        sel.innerHTML = `<option value="">Elige servicio...</option>`;
-        return;
-      }
-      sel.innerHTML = list.map(r=>{
-        const label = `${r.correo || "sin-correo"} | Perfil ${r.perfil || "—"} | PIN ${r.pin || "—"} | fila ${r.row}`;
-        return `<option value="${r.row}">${esc(label)}</option>`;
-      }).join("");
-    }
-
-    function render(){
-      const q = $("q").value.toLowerCase().trim();
-      const f = $("f").value;
-      const tb = $("tb");
-      tb.innerHTML = "";
-
-      const filtered = allRows.filter(r=>{
-        if (isRowEmpty(r)) return false; // ✅ doble protección
-        const s = `${r.codigo} ${r.nombre} ${r.telefono} ${r.servicio} ${r.correo}`.toLowerCase();
-        if(q && !s.includes(q)) return false;
-        if(f && r.bucket !== f) return false;
-        return true;
-      });
-
-      if(!filtered.length){
-        tb.innerHTML = `<tr><td colspan="6" style="padding:16px;color:rgba(181,192,255,.8)">No hay resultados</td></tr>`;
-        return;
-      }
-
-      filtered.forEach(r=>{
-        const disponible = isDisponibleName(r.nombre);
-
-        const cuentaHtml = `
-          <div><b>${esc(r.correo || "")}</b></div>
-          <div class="mini">Perfil: ${esc(r.perfil || "")} • PIN: ${esc(r.pin || "")}</div>
-          <div class="mini">${esc(r.contrasena || "")}</div>
-        `;
-
-        const clienteHtml = disponible
-          ? `<b style="color:rgba(181,192,255,.9)">Disponible</b>`
-          : `<b>${esc(r.nombre || "")}</b>`;
-
-        const acc = disponible
-          ? `
-            <button class="a-btn a-copy" data-act="copyacc" data-row="${r.row}">COPIAR</button>
-            <button class="a-btn a-move" data-act="editacc" data-row="${r.row}">EDITAR</button>
-            <button class="a-btn a-del" data-act="free" data-row="${r.row}">BORRAR</button>
-          `
-          : `
-            <button class="a-btn a-copy" data-act="copy" data-row="${r.row}">COPIAR</button>
-            <button class="a-btn a-renew" data-act="ren30" data-row="${r.row}">RENOVAR</button>
-            <button class="a-btn a-move" data-act="move" data-row="${r.row}">REASIGNAR</button>
-            <button class="a-btn a-del" data-act="free" data-row="${r.row}">BORRAR</button>
-          `;
-
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td class="svc">${esc(svcLabel(r.servicio))}</td>
-          <td>${cuentaHtml}</td>
-          <td>${clienteHtml}</td>
-          <td>${esc(r.telefono || "")}</td>
-          <td>${badgeEstado(r)}</td>
-          <td><div class="actions">${acc}</div></td>
-        `;
-        tb.appendChild(tr);
-      });
-    }
-
-    async function load(silent=false){
-      const now = Date.now();
-      if (now - lastLoadAt < 1200) return;
-      lastLoadAt = now;
-
-      if(!silent){ hideErr(); setStatus("Cargando…"); }
-
-      try{
-        const data = await api("/api/dashboard");
-
-        // ✅ NO CUENTES NI MUESTRES FILAS VACÍAS
-        allRows = (data.rows || []).filter(r => !isRowEmpty(r));
-
-        // ✅ contadores calculados con filas buenas
-        const counts = { vencidos:0, porvencer:0, activos:0, total:0 };
-        for(const r of allRows){
-          counts.total++;
-          if(r.bucket === "vencidos") counts.vencidos++;
-          else if(r.bucket === "porvencer") counts.porvencer++;
-          else if(r.bucket === "activos") counts.activos++;
-        }
-
-        $("cVencidos").textContent = counts.vencidos;
-        $("cActivos").textContent = counts.activos;
-        $("cTotal").textContent = counts.total;
-        $("cPorVencer").textContent = counts.porvencer;
-
-        $("availTotal").textContent = data.availableTotal ?? 0;
-
-        const by = data.availableByService || {};
-        const bySP = data.availableByServiceProfile || {};
-        const chips = Object.keys(by).sort().map(svc=>{
-          const per = bySP[svc] || {};
-          const perTxt = Object.entries(per)
-            .sort((a,b)=> String(a[0]).localeCompare(String(b[0])))
-            .map(([p,n])=> `P${p}:${n}`).join(" • ");
-          return `<span class="chip">${esc(svc)}: <b>${by[svc]}</b> <span style="opacity:.75;margin-left:8px">${esc(perTxt)}</span></span>`;
-        }).join("");
-        $("availBySvc").innerHTML = chips || `<span class="mini">No hay disponibles</span>`;
-
-        rebuildAvailableMap();
-
-        const sel = $("asSvc");
-        const services = Object.keys(availableMapByService).sort();
-        sel.innerHTML = services.length
-          ? `<option value="">Seleccionar...</option>` + services.map(s=> `<option value="${esc(s)}">${esc(s)} (${availableMapByService[s].length})</option>`).join("")
-          : `<option value="">Sin disponibles</option>`;
-
-        fillAccountDropdown();
-
-        if(!silent) setStatus(`Listo ✅ (${allRows.length})`);
-        render();
-        updateAutoInfo();
-      }catch(e){
-        showErr(e.message);
-        setStatus("❌ Error");
-      }
-    }
-
-    async function renovar(row, dias){
-      hideErr();
-      setStatus("Renovando…");
-      try{
-        await api("/api/renovar", { method:"POST", body: JSON.stringify({ row, dias }) });
-        setStatus("Renovado ✅");
-        await load(true);
-      }catch(e){
-        showErr(e.message);
-        setStatus("❌ Error");
-      }
-    }
-
-    async function editarCuenta(row){
-      const r = allRows.find(x => Number(x.row) === Number(row));
-      if(!r) return;
-      const correo = prompt("Correo (cuenta):", r.correo ?? ""); if(correo===null) return;
-      const contrasena = prompt("Contraseña (cuenta):", r.contrasena ?? ""); if(contrasena===null) return;
-      const perfil = prompt("Perfil (cuenta):", r.perfil ?? ""); if(perfil===null) return;
-      const pin = prompt("PIN (cuenta):", r.pin ?? ""); if(pin===null) return;
-
-      hideErr();
-      setStatus("Actualizando cuenta…");
-      try{
-        await api("/api/update", {
-          method:"POST",
-          body: JSON.stringify({ row, fields: { correo, contrasena, perfil, pin } })
-        });
-        setStatus("Cuenta actualizada ✅");
-        await load(true);
-      }catch(e){
-        showErr(e.message);
-        setStatus("❌ Error");
-      }
-    }
-
-    async function asignar(){
-      const servicio = $("asSvc").value.trim();
-      const row = Number($("asAccount").value);
-      const nombre = $("asName").value.trim();
-      const telefono = $("asTel").value.trim();
-      const dias = Number($("asDays").value || 30);
-
-      if(!servicio) return alert("Selecciona un servicio");
-      if(!Number.isFinite(row)) return alert("Selecciona una cuenta libre");
-      if(!nombre) return alert("Pon el nombre");
-      if(!telefono) return alert("Pon el teléfono");
-      if(!Number.isFinite(dias) || dias <= 0) return alert("Días inválidos");
-
-      hideErr();
-      setStatus("Asignando…");
-      try{
-        const out = await api("/api/asignar", {
-          method:"POST",
-          body: JSON.stringify({ row, nombre, telefono, dias })
-        });
-
-        const msg = buildWhatsappMessage({
-          nombre: nombre.toUpperCase(),
-          servicio: out.servicio,
-          correo: out.correo,
-          contrasena: out.contrasena,
-          perfil: out.perfil,
-          pin: out.pin,
-          vence: out.vence
-        });
-
-        await copyText(msg);
-
-        const box = $("assignMsg");
-        box.style.display = "block";
-        box.textContent = "✅ Asignada y mensaje copiado al portapapeles.\n\n" + msg;
-
-        $("asName").value = "";
-        $("asTel").value = "";
-
-        await load(true);
-        setStatus("Asignado ✅");
-      }catch(e){
-        showErr(e.message);
-        setStatus("❌ Error");
-      }
-    }
-
-    function updateAutoInfo(){
-      const on = $("autoOn").value === "on";
-      const sec = Math.max(5, Number($("autoSec").value || 30));
-      $("autoInfo").textContent = on ? `Auto ON • cada ${sec}s` : `Auto OFF`;
-    }
-
-    function applyAutoRefresh(){
-      const on = $("autoOn").value === "on";
-      const sec = Math.max(5, Number($("autoSec").value || 30));
-      if(autoTimer) clearInterval(autoTimer);
-      autoTimer = null;
-
-      if(on){
-        autoTimer = setInterval(() => load(true), sec * 1000);
-      }
-      updateAutoInfo();
-    }
-
-    document.addEventListener("visibilitychange", () => {
-      if (!document.hidden && $("autoOn").value === "on") load(true);
-    });
-
-    document.addEventListener("click", async (ev) => {
-      const btn = ev.target.closest("button");
-      if(!btn) return;
-
-      const act = btn.dataset.act;
-
-      if(act === "ren30") return renovar(Number(btn.dataset.row), 30);
-
-      if(act === "copy"){
-        const row = Number(btn.dataset.row);
-        const r = allRows.find(x => Number(x.row) === row);
-        if(!r) return;
-
-        const msg = buildWhatsappMessage({
-          nombre: (r.nombre || "CLIENTE").toUpperCase(),
-          servicio: r.servicio || "SERVICIO",
-          correo: r.correo || "",
-          contrasena: r.contrasena || "",
-          perfil: r.perfil || "",
-          pin: r.pin || "",
-          vence: r.vencimiento || ""
-        });
-
-        try{ await copyText(msg); alert("✅ Mensaje copiado"); } catch { alert("No se pudo copiar"); }
-        return;
-      }
-
-      if(act === "copyacc"){
-        const row = Number(btn.dataset.row);
-        const r = allRows.find(x => Number(x.row) === row);
-        if(!r) return;
-
-        const txt = `Servicio: ${r.servicio}
-Correo: ${r.correo}
-Contraseña: ${r.contrasena}
-Perfil: ${r.perfil}
-PIN: ${r.pin}
-Fila: ${r.row}`;
-
-        try{ await copyText(txt); alert("✅ Cuenta copiada"); } catch { alert("No se pudo copiar"); }
-        return;
-      }
-
-      if(act === "free"){
-        const row = Number(btn.dataset.row);
-        if(!confirm("¿Seguro que quieres liberar esta cuenta?")) return;
-        hideErr();
-        setStatus("Liberando…");
-        try{
-          await apiFree(row);
-          setStatus("Liberado ✅");
-          await load(true);
-        }catch(e){
-          showErr(e.message);
-          setStatus("❌ Error");
-        }
-        return;
-      }
-
-      if(act === "move"){
-        const fromRow = Number(btn.dataset.row);
-        const r = allRows.find(x => Number(x.row) === fromRow);
-        if(!r) return;
-
-        const svc = (r.servicio || "").trim();
-        const list = (availableMapByService[svc] || []).slice().sort((a,b)=> Number(a.row)-Number(b.row));
-        if(!list.length) return alert("No hay disponibles para este servicio.");
-
-        const pick = prompt(
-          `Pon la FILA destino (Disponible) para ${svc}. Ej: ${list[0].row}\n` +
-          `Opciones: ${list.slice(0,20).map(x=>x.row).join(", ")}${list.length>20?" ":""}`
-        );
-        if(pick === null) return;
-        const toRow = Number(pick);
-        if(!Number.isFinite(toRow)) return alert("Fila destino inválida");
-
-        hideErr();
-        setStatus("Reasignando…");
-
-        try{
-          const out = await api("/api/reassign", {
-            method:"POST",
-            body: JSON.stringify({ fromRow, toRow })
-          });
-
-          const msg = buildWhatsappMessage({
-            nombre: (r.nombre || "CLIENTE").toUpperCase(),
-            servicio: out.servicio,
-            correo: out.correo,
-            contrasena: out.contrasena,
-            perfil: out.perfil,
-            pin: out.pin,
-            vence: r.vencimiento || ""
-          });
-
-          await copyText(msg);
-          alert("✅ Reasignado. Mensaje copiado.");
-          await load(true);
-          setStatus("Reasignado ✅");
-        }catch(e){
-          showErr(e.message);
-          setStatus("❌ Error");
-        }
-        return;
-      }
-
-      if(act === "editacc") return editarCuenta(Number(btn.dataset.row));
-    });
-
-    $("btnReload").addEventListener("click", () => load(false));
-    $("q").addEventListener("input", render);
-    $("f").addEventListener("change", render);
-    $("btnAssign").addEventListener("click", asignar);
-    $("asSvc").addEventListener("change", fillAccountDropdown);
-
-    $("btnAutoApply").addEventListener("click", applyAutoRefresh);
-    $("autoOn").addEventListener("change", applyAutoRefresh);
-
-    load(false);
-    applyAutoRefresh();
-  </script>
 </body>
 </html>
