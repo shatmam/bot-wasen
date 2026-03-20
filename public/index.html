@@ -1,110 +1,62 @@
 <!DOCTYPE html>
-<html lang="es">
+<html>
 <head>
-<meta charset="UTF-8">
 <title>Panel</title>
-
 <style>
-body {
-  font-family: Arial;
-  background: #0f172a;
-  color: white;
-  padding: 20px;
-}
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-th, td {
-  padding: 10px;
-  text-align: center;
-}
-
-th {
-  background: #1e293b;
-}
-
-button {
-  padding: 6px 10px;
-  background: #22c55e;
-  border: none;
-  border-radius: 5px;
-  cursor: pointer;
-}
+body { font-family: Arial; background:#0f172a; color:white; }
+table { width:100%; }
+td,th { padding:10px; text-align:center; }
+button { background:green; color:white; border:none; padding:5px; }
 </style>
-
 </head>
 <body>
 
-<h1>Panel de Clientes</h1>
-<h2 id="total"></h2>
+<h1>Panel</h1>
 
 <table>
 <thead>
 <tr>
-<th>Correo</th>
-<th>WhatsApp</th>
-<th>Revendedor</th>
+<th>Nombre</th>
+<th>Teléfono</th>
+<th>Servicio</th>
 <th>Días</th>
-<th>Ganancia</th>
 <th>Acción</th>
 </tr>
 </thead>
+
 <tbody id="tabla"></tbody>
 </table>
 
 <script>
-const API = "https://TU-APP.railway.app"; // 👈 CAMBIA ESTO
-
-async function cargar() {
-  const res = await fetch(API + "/clientes");
+async function cargar(){
+  const res = await fetch("/clientes");
   const data = await res.json();
 
   const tabla = document.getElementById("tabla");
   tabla.innerHTML = "";
 
-  let total = 0;
-
-  data.forEach(c => {
-    total += c.ganancia;
-
-    let color = "white";
-    if (c.dias <= 0) color = "red";
-    else if (c.dias <= 3) color = "orange";
-
-    const fila = `
-      <tr>
-        <td>${c.correo}</td>
-        <td>${c.whatsapp}</td>
-        <td>${c.revendedor}</td>
-        <td style="color:${color}">${c.dias}</td>
-        <td>RD$${c.ganancia}</td>
-        <td>
-          <button onclick="renovar(${c.id})">Renovar</button>
-        </td>
-      </tr>
+  data.forEach(c=>{
+    tabla.innerHTML += `
+    <tr>
+      <td>${c.nombre}</td>
+      <td>${c.telefono}</td>
+      <td>${c.servicio}</td>
+      <td>${c.dias}</td>
+      <td>
+        <button onclick="renovar(${c.row})">Renovar</button>
+      </td>
+    </tr>
     `;
-
-    tabla.innerHTML += fila;
   });
-
-  document.getElementById("total").innerText = "Total: RD$" + total;
 }
 
-async function renovar(id) {
+async function renovar(row){
   let dias = prompt("Días a agregar:");
 
-  await fetch(API + "/renovar", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      id,
-      diasExtra: parseInt(dias)
-    })
+  await fetch("/renovar",{
+    method:"POST",
+    headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ row, dias })
   });
 
   alert("Renovado");
