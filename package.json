@@ -1,19 +1,14 @@
 {
-  "name": "bot-wasen",
+  "name": "panel-clientes",
   "version": "1.0.0",
-  "description": "Bot de notificaciones Netflix",
-  "main": "index.js",
+  "main": "server.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node server.js"
   },
   "dependencies": {
-    "dotenv": "^16.4.5",
-    "googleapis": "^126.0.0",
-    "imapflow": "^1.0.158",
-    "mailparser": "^3.7.1",
-    "node-fetch": "^2.7.0"
-  },
-  "engines": {
-    "node": "18.x"
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.0",
+    "express": "^4.18.2",
+    "googleapis": "^133.0.0"
   }
 }
